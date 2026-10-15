@@ -1,0 +1,419 @@
+[gd_scene format=3 uid="uid://hsmli8aqa6i4"]
+
+[ext_resource type="Script" uid="uid://coek6u712yys6" path="res://scripts/GyroSwordController.cs" id="1_gyro"]
+[ext_resource type="Script" uid="uid://bn7x503xmoh8x" path="res://scripts/GripGuide.cs" id="3_guide"]
+[ext_resource type="Script" uid="uid://c72nff7qkptlg" path="res://scripts/SwordVisibility.cs" id="4_visibility"]
+[ext_resource type="PackedScene" path="res://scenes/player.tscn" id="5_player"]
+[ext_resource type="PackedScene" path="res://scenes/training_dummy.tscn" id="6_dummy"]
+[ext_resource type="Script" uid="uid://2ysgacl2bqja" path="res://scripts/FollowCamera.cs" id="7_camera"]
+[ext_resource type="Script" uid="uid://c35g2g8nwggnt" path="res://scripts/SwordImpact.cs" id="8_impact"]
+
+[sub_resource type="Environment" id="ArenaEnvironment"]
+background_mode = 1
+background_color = Color(0.12, 0.17, 0.23, 1)
+ambient_light_source = 3
+ambient_light_color = Color(0.65, 0.76, 0.9, 1)
+ambient_light_energy = 0.65
+tonemap_mode = 2
+
+[sub_resource type="StandardMaterial3D" id="Floor"]
+albedo_color = Color(0.19, 0.23, 0.27, 1)
+roughness = 0.8
+
+[sub_resource type="BoxMesh" id="Mesh1"]
+material = SubResource("Floor")
+size = Vector3(12, 0.3, 14)
+
+[sub_resource type="BoxShape3D" id="FloorCollision"]
+size = Vector3(12, 0.3, 14)
+
+[sub_resource type="StandardMaterial3D" id="Wall"]
+albedo_color = Color(0.25, 0.3, 0.35, 1)
+roughness = 0.8
+
+[sub_resource type="BoxMesh" id="Mesh2"]
+material = SubResource("Wall")
+size = Vector3(12, 2.2, 0.35)
+
+[sub_resource type="BoxMesh" id="Mesh3"]
+material = SubResource("Wall")
+size = Vector3(0.3, 1.1, 12)
+
+[sub_resource type="BoxMesh" id="Mesh4"]
+material = SubResource("Wall")
+size = Vector3(0.3, 1.1, 12)
+
+[sub_resource type="StandardMaterial3D" id="Markings"]
+albedo_color = Color(0.56, 0.65, 0.66, 1)
+roughness = 0.8
+
+[sub_resource type="BoxMesh" id="Mesh5"]
+material = SubResource("Markings")
+size = Vector3(0.014, 0.008, 12)
+
+[sub_resource type="BoxMesh" id="Mesh6"]
+material = SubResource("Markings")
+size = Vector3(0.014, 0.008, 12)
+
+[sub_resource type="BoxMesh" id="Mesh7"]
+material = SubResource("Markings")
+size = Vector3(0.014, 0.008, 12)
+
+[sub_resource type="BoxMesh" id="Mesh8"]
+material = SubResource("Markings")
+size = Vector3(0.014, 0.008, 12)
+
+[sub_resource type="BoxMesh" id="Mesh9"]
+material = SubResource("Markings")
+size = Vector3(0.014, 0.008, 12)
+
+[sub_resource type="BoxMesh" id="Mesh10"]
+material = SubResource("Markings")
+size = Vector3(0.014, 0.008, 12)
+
+[sub_resource type="BoxMesh" id="Mesh11"]
+material = SubResource("Markings")
+size = Vector3(0.014, 0.008, 12)
+
+[sub_resource type="BoxMesh" id="Mesh12"]
+material = SubResource("Markings")
+size = Vector3(0.014, 0.008, 12)
+
+[sub_resource type="BoxMesh" id="Mesh13"]
+material = SubResource("Markings")
+size = Vector3(0.014, 0.008, 12)
+
+[sub_resource type="BoxMesh" id="Mesh14"]
+material = SubResource("Markings")
+size = Vector3(0.014, 0.008, 12)
+
+[sub_resource type="BoxMesh" id="Mesh15"]
+material = SubResource("Markings")
+size = Vector3(0.014, 0.008, 12)
+
+[sub_resource type="BoxMesh" id="Mesh16"]
+material = SubResource("Markings")
+size = Vector3(10, 0.008, 0.014)
+
+[sub_resource type="BoxMesh" id="Mesh17"]
+material = SubResource("Markings")
+size = Vector3(10, 0.008, 0.014)
+
+[sub_resource type="BoxMesh" id="Mesh18"]
+material = SubResource("Markings")
+size = Vector3(10, 0.008, 0.014)
+
+[sub_resource type="BoxMesh" id="Mesh19"]
+material = SubResource("Markings")
+size = Vector3(10, 0.008, 0.014)
+
+[sub_resource type="BoxMesh" id="Mesh20"]
+material = SubResource("Markings")
+size = Vector3(10, 0.008, 0.014)
+
+[sub_resource type="BoxMesh" id="Mesh21"]
+material = SubResource("Markings")
+size = Vector3(10, 0.008, 0.014)
+
+[sub_resource type="BoxMesh" id="Mesh22"]
+material = SubResource("Markings")
+size = Vector3(10, 0.008, 0.014)
+
+[sub_resource type="BoxMesh" id="Mesh23"]
+material = SubResource("Markings")
+size = Vector3(10, 0.008, 0.014)
+
+[sub_resource type="BoxMesh" id="Mesh24"]
+material = SubResource("Markings")
+size = Vector3(10, 0.008, 0.014)
+
+[sub_resource type="BoxMesh" id="Mesh25"]
+material = SubResource("Markings")
+size = Vector3(10, 0.008, 0.014)
+
+[sub_resource type="BoxMesh" id="Mesh26"]
+material = SubResource("Markings")
+size = Vector3(10, 0.008, 0.014)
+
+[sub_resource type="BoxMesh" id="Mesh27"]
+material = SubResource("Markings")
+size = Vector3(10, 0.008, 0.014)
+
+[sub_resource type="BoxMesh" id="Mesh28"]
+material = SubResource("Floor")
+size = Vector3(0.28, 2.6, 0.45)
+
+[sub_resource type="BoxMesh" id="Mesh29"]
+material = SubResource("Floor")
+size = Vector3(0.28, 2.6, 0.45)
+
+[sub_resource type="BoxMesh" id="Mesh30"]
+material = SubResource("Floor")
+size = Vector3(0.28, 2.6, 0.45)
+
+[sub_resource type="BoxMesh" id="Mesh31"]
+material = SubResource("Floor")
+size = Vector3(0.28, 2.6, 0.45)
+
+[sub_resource type="BoxMesh" id="Mesh32"]
+material = SubResource("Floor")
+size = Vector3(12.15, 0.15, 0.5)
+
+[node name="TestArena" type="Node3D" unique_id=611192505]
+script = ExtResource("1_gyro")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=801507430]
+environment = SubResource("ArenaEnvironment")
+
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=1236723323]
+transform = Transform3D(0.8660254, 0.37157243, -0.33456528, 0, 0.66913056, 0.74314487, 0.5, -0.64358234, 0.57948405, 0, 0, 0)
+light_color = Color(1, 0.88, 0.72, 1)
+light_energy = 1.6
+shadow_enabled = true
+directional_shadow_max_distance = 35.0
+
+[node name="FillLight" type="OmniLight3D" parent="." unique_id=1100575304]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 4, 2)
+light_color = Color(0.61, 0.78, 1, 1)
+light_energy = 1.8
+omni_range = 12.0
+
+[node name="Arena" type="Node3D" parent="." unique_id=15092426]
+
+[node name="Floor" type="MeshInstance3D" parent="Arena" unique_id=2052721240]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.16, -1)
+mesh = SubResource("Mesh1")
+
+[node name="FloorBody" type="StaticBody3D" parent="Arena" unique_id=1280827298]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Arena/FloorBody" unique_id=1709184429]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.16, -1)
+shape = SubResource("FloorCollision")
+
+[node name="BackWall" type="MeshInstance3D" parent="Arena" unique_id=203244988]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.1, -7)
+mesh = SubResource("Mesh2")
+
+[node name="LeftWall" type="MeshInstance3D" parent="Arena" unique_id=252142997]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.55, -1)
+mesh = SubResource("Mesh3")
+
+[node name="RightWall" type="MeshInstance3D" parent="Arena" unique_id=2018330176]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 0.55, -1)
+mesh = SubResource("Mesh4")
+
+[node name="FloorLineX0" type="MeshInstance3D" parent="Arena" unique_id=1106712424]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0.001, -1)
+mesh = SubResource("Mesh5")
+
+[node name="FloorLineX1" type="MeshInstance3D" parent="Arena" unique_id=269940069]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0.001, -1)
+mesh = SubResource("Mesh6")
+
+[node name="FloorLineX2" type="MeshInstance3D" parent="Arena" unique_id=752758162]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0.001, -1)
+mesh = SubResource("Mesh7")
+
+[node name="FloorLineX3" type="MeshInstance3D" parent="Arena" unique_id=227776294]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 0.001, -1)
+mesh = SubResource("Mesh8")
+
+[node name="FloorLineX4" type="MeshInstance3D" parent="Arena" unique_id=1327357909]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1, 0.001, -1)
+mesh = SubResource("Mesh9")
+
+[node name="FloorLineX5" type="MeshInstance3D" parent="Arena" unique_id=1176799542]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.001, -1)
+mesh = SubResource("Mesh10")
+
+[node name="FloorLineX6" type="MeshInstance3D" parent="Arena" unique_id=963292071]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0.001, -1)
+mesh = SubResource("Mesh11")
+
+[node name="FloorLineX7" type="MeshInstance3D" parent="Arena" unique_id=1587898571]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 0.001, -1)
+mesh = SubResource("Mesh12")
+
+[node name="FloorLineX8" type="MeshInstance3D" parent="Arena" unique_id=2137948085]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0.001, -1)
+mesh = SubResource("Mesh13")
+
+[node name="FloorLineX9" type="MeshInstance3D" parent="Arena" unique_id=2022298440]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0.001, -1)
+mesh = SubResource("Mesh14")
+
+[node name="FloorLineX10" type="MeshInstance3D" parent="Arena" unique_id=1418580605]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0.001, -1)
+mesh = SubResource("Mesh15")
+
+[node name="FloorLineZ0" type="MeshInstance3D" parent="Arena" unique_id=1285212112]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.002, -6)
+mesh = SubResource("Mesh16")
+
+[node name="FloorLineZ1" type="MeshInstance3D" parent="Arena" unique_id=1799840283]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.002, -5)
+mesh = SubResource("Mesh17")
+
+[node name="FloorLineZ2" type="MeshInstance3D" parent="Arena" unique_id=1064211730]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.002, -4)
+mesh = SubResource("Mesh18")
+
+[node name="FloorLineZ3" type="MeshInstance3D" parent="Arena" unique_id=546081126]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.002, -3)
+mesh = SubResource("Mesh19")
+
+[node name="FloorLineZ4" type="MeshInstance3D" parent="Arena" unique_id=292387030]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.002, -2)
+mesh = SubResource("Mesh20")
+
+[node name="FloorLineZ5" type="MeshInstance3D" parent="Arena" unique_id=303459058]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.002, -1)
+mesh = SubResource("Mesh21")
+
+[node name="FloorLineZ6" type="MeshInstance3D" parent="Arena" unique_id=1127332603]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.002, 0)
+mesh = SubResource("Mesh22")
+
+[node name="FloorLineZ7" type="MeshInstance3D" parent="Arena" unique_id=345488433]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.002, 1)
+mesh = SubResource("Mesh23")
+
+[node name="FloorLineZ8" type="MeshInstance3D" parent="Arena" unique_id=712176309]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.002, 2)
+mesh = SubResource("Mesh24")
+
+[node name="FloorLineZ9" type="MeshInstance3D" parent="Arena" unique_id=166557496]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.002, 3)
+mesh = SubResource("Mesh25")
+
+[node name="FloorLineZ10" type="MeshInstance3D" parent="Arena" unique_id=1285646327]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.002, 4)
+mesh = SubResource("Mesh26")
+
+[node name="FloorLineZ11" type="MeshInstance3D" parent="Arena" unique_id=444586969]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.002, 5)
+mesh = SubResource("Mesh27")
+
+[node name="WallPillar-5.5" type="MeshInstance3D" parent="Arena" unique_id=713331034]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5.5, 1.3, -6.76)
+mesh = SubResource("Mesh28")
+
+[node name="WallPillar-3" type="MeshInstance3D" parent="Arena" unique_id=1476533136]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 1.3, -6.76)
+mesh = SubResource("Mesh29")
+
+[node name="WallPillar3" type="MeshInstance3D" parent="Arena" unique_id=509837304]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 1.3, -6.76)
+mesh = SubResource("Mesh30")
+
+[node name="WallPillar5.5" type="MeshInstance3D" parent="Arena" unique_id=71470767]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5.5, 1.3, -6.76)
+mesh = SubResource("Mesh31")
+
+[node name="WallCap" type="MeshInstance3D" parent="Arena" unique_id=766065954]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.24, -7)
+mesh = SubResource("Mesh32")
+
+[node name="TrainingDummy" parent="." unique_id=672384742 instance=ExtResource("6_dummy")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -3.1)
+
+[node name="Player" parent="." unique_id=1294998166 instance=ExtResource("5_player")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.65, 0, 0.7)
+
+[node name="ShoulderCamera" type="Camera3D" parent="." unique_id=529191584]
+transform = Transform3D(0.96105546, -0.097352974, 0.25864038, 0, 0.9358968, 0.35227424, -0.27635565, -0.33855507, 0.89944875, 1.25, 3.2, 3.15)
+current = true
+fov = 60.0
+far = 100.0
+script = ExtResource("7_camera")
+
+[node name="Overlay" type="CanvasLayer" parent="." unique_id=2060580205]
+
+[node name="Title" type="Label" parent="Overlay" unique_id=1862928354]
+offset_left = 30.0
+offset_top = 24.0
+offset_right = 600.0
+offset_bottom = 64.0
+theme_override_colors/font_color = Color(0.85, 0.92, 0.95, 1)
+theme_override_font_sizes/font_size = 23
+text = "NAVI SWORD / ТЕСТОВАЯ ЗОНА"
+
+[node name="Subtitle" type="Label" parent="Overlay" unique_id=1736310700]
+offset_left = 31.0
+offset_top = 60.0
+offset_right = 1000.0
+offset_bottom = 95.0
+theme_override_colors/font_color = Color(0.64, 0.76, 0.8, 1)
+theme_override_font_sizes/font_size = 16
+text = "10   •   Гироскоп: короткие атаки   /   Правый стик: замах и удар   /   Левый стик: поправка кисти"
+
+[node name="HitReadout" type="Label" parent="Overlay" unique_id=1810132388]
+offset_left = 31.0
+offset_top = 92.0
+offset_right = 900.0
+offset_bottom = 120.0
+theme_override_colors/font_color = Color(1, 0.84, 0.5, 1)
+theme_override_font_sizes/font_size = 16
+text = "Попаданий: 0"
+
+[node name="StatusBackground" type="ColorRect" parent="Overlay" unique_id=340616104]
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -120.0
+mouse_filter = 2
+color = Color(0.035, 0.055, 0.075, 0.88)
+
+[node name="Status" type="Label" parent="Overlay" unique_id=748712877]
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 31.0
+offset_top = -102.0
+offset_right = 1240.0
+offset_bottom = -77.0
+theme_override_colors/font_color = Color(0.7, 0.8, 0.84, 1)
+theme_override_font_sizes/font_size = 16
+text = "Поиск DualSense…"
+
+[node name="GyroReadout" type="Label" parent="Overlay" unique_id=185000763]
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 31.0
+offset_top = -75.0
+offset_right = 1240.0
+offset_bottom = -50.0
+theme_override_colors/font_color = Color(0.7, 0.8, 0.84, 1)
+theme_override_font_sizes/font_size = 16
+
+[node name="Controls" type="Label" parent="Overlay" unique_id=566301401]
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 31.0
+offset_top = -45.0
+offset_right = 1240.0
+offset_bottom = -20.0
+theme_override_colors/font_color = Color(0.85, 0.92, 0.95, 1)
+theme_override_font_sizes/font_size = 16
+text = "Стрелки / крестовина: ходьба · R2: вытянуть вдоль меча · R1: центр · L1: перехват · △ / C: калибровка · [ / ]: отклик"
+
+[node name="GripGuide" type="Control" parent="Overlay" unique_id=1538034860]
+layout_mode = 3
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -279.0
+offset_top = 105.0
+offset_right = -19.0
+offset_bottom = 320.0
+mouse_filter = 2
+script = ExtResource("3_guide")
+
+[node name="SwordVisibility" type="Node" parent="." unique_id=662241330]
+script = ExtResource("4_visibility")
+
+[node name="SwordImpact" type="Node" parent="." unique_id=457981111]
+script = ExtResource("8_impact")
