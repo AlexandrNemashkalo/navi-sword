@@ -285,23 +285,35 @@ public partial class JointLab
     /// <summary>The pad vibrates with the sword arm's postural load (unticked: not at all).</summary>
     public bool LoadRumble { get; set; } = true;
     private float _rumbleSent = -1, _rumbleFor;
+    /// <summary>The load at which the pad starts to vibrate, points (in category II, which begins at 5).</summary>
+    private const float RumbleFrom = 7;
+    /// <summary>
+    /// How long the arm has been held loaded (above RumbleFrom), seconds, up to RumbleHold: the
+    /// vibration comes on as it fills, so a cut passing through a loaded pose does not buzz, a
+    /// pose held there does. It drains twice as fast once the arm is eased.
+    /// </summary>
+    private float _heldLoaded;
+    private const float RumbleHold = 0.6f;
 
     /// <summary>
     /// How hard the pad vibrates for a postural load (LUBA points), 0–1, and how much of that
-    /// is the heavy motor. Category I (up to 5, safe) not at all; through category II (to 12)
-    /// the light motor alone, from barely felt to a third; through III (to 25) up to four
+    /// is the heavy motor. Up to RumbleFrom (category I and the light end of II) not at all;
+    /// through the rest of category II (to 12) the light motor alone, from barely felt to a third; through III (to 25) up to four
     /// fifths, the heavy motor coming in; in IV on to full at 35. Smooth all the way: the
     /// number, not only its category, is felt.
     /// </summary>
     private static (float Weak, float Strong) RumbleFor(float load)
     {
-        float level = load <= 5 ? 0
-            : load <= 12 ? Mathf.Lerp(0.05f, 0.35f, (load - 5) / 7)
+        float level = load <= RumbleFrom ? 0
+            : load <= 12 ? Mathf.Lerp(0.05f, 0.35f, (load - RumbleFrom) / (12 - RumbleFrom))
             : load <= 25 ? Mathf.Lerp(0.35f, 0.8f, (load - 12) / 13)
             : Mathf.Lerp(0.8f, 1, Mathf.Clamp((load - 25) / 10, 0, 1));
         float heavy = Mathf.Clamp((load - 12) / 13, 0, 1);
         return (level, level * heavy);
     }
+
+    /// <summary>For tests: how far the vibration has come on with the pose held loaded (0–1).</summary>
+    public float RumbleHeld => Mathf.SmoothStep(0, 1, _heldLoaded / RumbleHold);
 
     /// <summary>For tests (GDScript sees no static methods): RumbleFor as (light, heavy motor).</summary>
     public Vector2 RumbleAt(float load)
@@ -314,7 +326,11 @@ public partial class JointLab
     private void Rumble(float dt)
     {
         float load = Load(_arms[0].Angles);
+        _heldLoaded = Mathf.Clamp(_heldLoaded + (load > RumbleFrom ? dt : -2 * dt), 0, RumbleHold);
+        float held = Mathf.SmoothStep(0, 1, _heldLoaded / RumbleHold);
         var (weak, strong) = LoadRumble ? RumbleFor(load) : (0f, 0f);
+        weak *= held;
+        strong *= held;
         _rumbleLabel.Text = LoadRumble ? $"Вибрация по нагрузке: {100 * weak:0}% (тяжёлый мотор {100 * strong:0}%)" : "Вибрация по нагрузке: выключена";
         if (_device < 0)
             return;
