@@ -8,9 +8,14 @@ using Godot;
 /// </summary>
 public sealed class BodyVolumes
 {
-    public readonly record struct Ellipsoid(int Bone, Transform3D Frame, Vector3 Semi)
+    public sealed class Ellipsoid
     {
-        public Transform3D Inverse { get; } = Frame.AffineInverse();
+        public int Bone;
+        public Vector3 Semi;
+        /// <summary>The largest semi-axis: nothing farther than this from the centre can be inside.</summary>
+        public float Reach;
+        /// <summary>Where it is when built, and where it is now (after Move).</summary>
+        public Transform3D Rest, Frame, Inverse;
     }
 
     public readonly List<Ellipsoid> Shapes = new();
@@ -70,8 +75,25 @@ public sealed class BodyVolumes
                 reach.Add(((inverse * p - centre) / semi).Length());
             reach.Sort();
             float grow = Mathf.Max(1, reach[(int)(reach.Count * Covered)]);
-            Shapes.Add(new Ellipsoid(bone, frame * new Transform3D(Basis.Identity, centre), semi * grow));
+            var rest = frame * new Transform3D(Basis.Identity, centre);
+            Vector3 grown = semi * grow;
+            Shapes.Add(new Ellipsoid
+            {
+                Bone = bone, Semi = grown, Reach = Mathf.Max(grown.X, Mathf.Max(grown.Y, grown.Z)),
+                Rest = rest, Frame = rest, Inverse = rest.AffineInverse(),
+            });
         }
+    }
+
+    /// <summary>A bone has moved by this (skeleton space, from where it was when built): its ellipsoid goes with it.</summary>
+    public void Move(int bone, Transform3D moved)
+    {
+        foreach (var shape in Shapes)
+            if (shape.Bone == bone)
+            {
+                shape.Frame = moved * shape.Rest;
+                shape.Inverse = shape.Frame.AffineInverse();
+            }
     }
 
     /// <summary>Typical distance of a bone's vertices from the segment a→b: the limb's radius there.</summary>
@@ -96,6 +118,10 @@ public sealed class BodyVolumes
         float deepest = 0;
         foreach (var shape in Shapes)
         {
+            // Far from this shape, a ball cannot be inside it.
+            float reach = shape.Reach + r;
+            if ((p - shape.Frame.Origin).LengthSquared() > reach * reach)
+                continue;
             Vector3 u = shape.Inverse * p;
             float s = (u / shape.Semi).Length();
             float radial = u.Length();

@@ -19,7 +19,7 @@ public partial class JointLab : Node3D
     {
         new("Плоскость подъёма плеча", "назад · в сторону 0 · вперёд 90 · поперёк груди", -95, 130, 0),
         new("Подъём плеча", "вниз 0 · над головой 180", 0, 180, 0),
-        new("Вращение плеча", "от удобного положения: наружу − · внутрь +; ход зависит от положения руки", -80, 80, 0),
+        new("Вращение плеча", "наружу − · внутрь + (от удобного положения)", -80, 80, 0),
         new("Локоть", "прямой 0 · согнут", 0, 130, 0),
         new("Предплечье", "супинация − · пронация +", -90, 90, 0),
         new("Кисть: сгиб", "разгибание − · сгибание +", -45, 45, -20),
@@ -53,8 +53,25 @@ public partial class JointLab : Node3D
     private Vector3 _chest, _forward, _right;
     private float _orbit = 25;
     private BodyVolumes _body = null!;
+    /// <summary>
+    /// The trunk's turn, degrees: positive brings the sword (right) shoulder forward. Fighting
+    /// one-handed, a swordsman stands bladed, the sword side towards the opponent; the trunk
+    /// turns further with the arm — back for a cut wound up behind, round for one from the left.
+    /// </summary>
+    private float _twist = float.NaN;
+    private const float Bladed = 30, TwistShare = 0.5f, TwistMin = -45, TwistMax = 60;
+    /// <summary>How the upper body has moved with the turn (skeleton space): the arms are worked out unturned, then moved by this.</summary>
+    private Transform3D _turn = Transform3D.Identity;
+    private int _spine1, _spine2, _neck, _head;
+    private readonly Dictionary<int, Transform3D> _trunkIdle = new();
+    private Vector3 _twistAxis;
+    private Label _trunkLabel = null!, _pathLabel = null!;
     /// <summary>The legs: the sword keeps out of them (the arms are not checked against them).</summary>
     private BodyVolumes _legs = null!;
+    private JointLabFootwork _footwork = null!;
+    private readonly Dictionary<int, Transform3D> _legIdle = new();
+    public bool FeetMoving => _footwork.Moving;
+    public Vector3 FootPosition(int foot) => _footwork.Foot(foot);
     private static readonly string[] Legs = { "thigh.l", "calf.l", "foot.l", "thigh.r", "calf.r", "foot.r" };
     /// <summary>The sword in the right hand; its grip in the hand bone's frame.</summary>
     private Node3D _sword = null!;
@@ -155,7 +172,15 @@ public partial class JointLab : Node3D
             arm.TipAt = handIdle.AffineInverse() * (tip + (tip - At("middle_02." + s)).Normalized() * 0.02f);
         }
         _body = new BodyVolumes(_skeleton, bodyMesh, Trunk);
+        (_spine1, _spine2, _neck, _head) = (Bone("spine_01"), Bone("spine_02"), Bone("neck_01"), Bone("head"));
+        foreach (int bone in new[] { _spine1, _spine2, _neck, _head })
+            _trunkIdle[bone] = _skeleton.GetBoneGlobalPose(bone);
+        // Turning about the trunk's own up: the right shoulder towards the front.
+        _twistAxis = right.Cross(forward).Normalized();
         _legs = new BodyVolumes(_skeleton, bodyMesh, Legs);
+        _footwork = new JointLabFootwork(_skeleton);
+        foreach (string name in Legs)
+            _legIdle[Bone(name)] = _skeleton.GetBoneGlobalPose(Bone(name));
         // The grip, from the closed fist's finger bones. A one-handed sword is held in the
         // handshake grip: little finger at the pommel, thumb closed over the index, the
         // handle lying obliquely across the palm so the sword points forward rather than
@@ -291,11 +316,11 @@ public partial class JointLab : Node3D
         float depth = 0;
         // The upper arm from midway: by the shoulder it is meant to touch the trunk.
         foreach (float t in new[] { 0.5f, 0.65f, 0.8f, 1f })
-            depth += _body.Depth(p.Shoulder.Lerp(p.Elbow, t), arm.UpperRadius + margin);
+            depth += _body.Depth(_turn * p.Shoulder.Lerp(p.Elbow, t), arm.UpperRadius + margin);
         foreach (float t in new[] { 0.25f, 0.5f, 0.75f, 1f })
-            depth += _body.Depth(p.Elbow.Lerp(p.Wrist, t), arm.ForeRadius + margin);
-        depth += _body.Depth(p.Knuckle, arm.HandRadius + margin);
-        depth += _body.Depth(p.Tip, arm.HandRadius * 0.7f + margin);
+            depth += _body.Depth(_turn * p.Elbow.Lerp(p.Wrist, t), arm.ForeRadius + margin);
+        depth += _body.Depth(_turn * p.Knuckle, arm.HandRadius + margin);
+        depth += _body.Depth(_turn * p.Tip, arm.HandRadius * 0.7f + margin);
         return depth;
     }
 
@@ -378,18 +403,18 @@ public partial class JointLab : Node3D
         float depth = 0;
         for (int i = 0; i <= 11; i++)
         {
-            Vector3 point = SwordPoint(sword, Mathf.Lerp(BladeFrom, BladeTo, i / 11f));
+            Vector3 point = _turn * SwordPoint(sword, Mathf.Lerp(BladeFrom, BladeTo, i / 11f));
             depth += _body.Depth(point, BladeRadius + margin) + _legs.Depth(point, BladeRadius + margin);
         }
         foreach (float y in new[] { PommelFrom, (PommelFrom + PommelTo) / 2 })
         {
-            Vector3 point = SwordPoint(sword, y);
+            Vector3 point = _turn * SwordPoint(sword, y);
             depth += _body.Depth(point, PommelRadius + margin) + _legs.Depth(point, PommelRadius + margin);
         }
         var (guardA, guardB) = Guard(sword);
         for (int i = 0; i <= 4; i++)
         {
-            Vector3 point = guardA.Lerp(guardB, i / 4f);
+            Vector3 point = _turn * guardA.Lerp(guardB, i / 4f);
             depth += _body.Depth(point, GuardRadius + margin) + _legs.Depth(point, GuardRadius + margin);
         }
         return depth;
@@ -508,7 +533,18 @@ public partial class JointLab : Node3D
         const float tolerated = 40; // twisted in this far past comfortable, the raised arm hurts
         // A pose whose joints together load the arm too much counts as painful too (2° per point).
         return raised * (Mathf.Max(0, twist - tolerated) + Mathf.Max(0, plane - 110))
-            + 2 * Mathf.Max(0, Load(a) - ComfortLimit);
+            + 2 * Mathf.Max(0, Load(a) - ComfortLimit)
+            + OverheadGripStrain(a);
+    }
+
+    // Gameplay comfort preference, separate from the published joint ranges and
+    // LUBA score (which does not rate pronation). Avoid a maximally twisted
+    // forearm with a bent elbow overhead, without banning high sword guards.
+    private static float OverheadGripStrain(float[] a)
+    {
+        float overhead = Mathf.SmoothStep(0, 1, Mathf.Clamp((a[1] - 115) / 40, 0, 1));
+        float bent = Mathf.SmoothStep(0, 1, Mathf.Clamp((a[3] - 35) / 45, 0, 1));
+        return overhead * bent * Mathf.Max(0, Mathf.Abs(a[4]) - 60);
     }
 
     /// <summary>
@@ -531,6 +567,17 @@ public partial class JointLab : Node3D
     private static readonly Classes WristExtension = new(new[] { 20f, 45 }, new[] { 1f, 2, 7 });
     private static readonly Classes RadialDeviation = new(new[] { 10f, 30 }, new[] { 1f, 3, 7 });
     private static readonly Classes UlnarDeviation = new(new[] { 10f, 20 }, new[] { 1f, 3, 6 });
+    private static readonly Classes TrunkRotation = new(new[] { 20f, 60 }, new[] { 1f, 3, 10 });
+    private static readonly Classes NeckRotation = new(new[] { 30f, 60 }, new[] { 1f, 2, 8 });
+
+    /// <summary>A joint motion's score for an angle; the classes are joined by 10° ramps so it changes smoothly.</summary>
+    private static float Score(float angle, Classes classes)
+    {
+        float code = classes.Scores[0];
+        for (int i = 0; i < classes.Bounds.Length; i++)
+            code += (classes.Scores[i + 1] - classes.Scores[i]) * Mathf.Clamp((angle - classes.Bounds[i]) / 10, 0, 1);
+        return code;
+    }
 
     /// <summary>
     /// Postural load of the arm, in the points of the LUBA-based classification (Kee and
@@ -541,14 +588,6 @@ public partial class JointLab : Node3D
     /// </summary>
     private static float Load(float[] a)
     {
-        // The classes are joined by 10° ramps so the load changes smoothly.
-        static float Score(float angle, Classes classes)
-        {
-            float code = classes.Scores[0];
-            for (int i = 0; i < classes.Bounds.Length; i++)
-                code += (classes.Scores[i + 1] - classes.Scores[i]) * Mathf.Clamp((angle - classes.Bounds[i]) / 10, 0, 1);
-            return code;
-        }
         // Only scores of 2 and more count; the step to them is smoothed too.
         static float Counted(float code) => code * Mathf.Clamp(code - 1, 0, 1);
 
@@ -584,6 +623,11 @@ public partial class JointLab : Node3D
         { (0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (0, 5), (0, 6), (1, 0), (1, 1), (1, 2), (1, 3) };
 
     private float[] Angles(int g) => _arms[Solved[g].Arm].Angles;
+    private readonly float[] _solveWeight = new float[Solved.Length], _solveFrame = new float[Solved.Length],
+        _solveGradient = new float[Solved.Length], _solveDelta = new float[Solved.Length],
+        _solveStart = new float[Solved.Length], _solveB = new float[Solved.Length];
+    private int _quietSolveFrames;
+    public bool PoseSettled => _settled && !_footwork.Moving && !PlanningPose && !FollowingPosePath;
 
     /// <summary>Gradient of the overlap over the solved joints.</summary>
     private void OverlapGradient(float[] right, float[] left, float margin, float[] gradient)
@@ -607,6 +651,7 @@ public partial class JointLab : Node3D
         }
         for (int g = 0; g < Solved.Length; g++)
         {
+            CheckSearchDeadline();
             float[] angles = Angles(g);
             int d = Solved[g].Dof;
             float keep = angles[d];
@@ -629,31 +674,47 @@ public partial class JointLab : Node3D
     /// away by the hand first and by the arm only when the hand cannot do it, a blocked arm
     /// goes round the obstacle, and when the arms meet, the one not being moved makes way.
     /// </summary>
-    private void Settle(float dt)
+    private void Settle(float dt, bool planning = false, bool live = false)
     {
         // A long frame (a hitch) must not turn into a jump of the arm.
         dt = Mathf.Min(dt, 1f / 30);
-        float step = Speed * dt;
+        // Live input (a gamepad, a dragged slider) is followed three times as fast: a cut
+        // made with the pad must not trail behind it.
+        float step = Speed * dt * (planning ? 4 : live ? LiveSpeedUp : 1);
         // Nothing to do while the sliders stand still and the arms have settled.
         bool goalsStill = true;
         foreach (var arm in _arms)
             for (int d = 0; d < Dofs.Length; d++)
                 if (arm.Goal[d] != arm.Target[d]) goalsStill = false;
         if (goalsStill && _settled)
+        {
+            _settlePath = "still";
             return;
+        }
         _settled = false;
         int n = Solved.Length;
-        var weight = new float[n];
+        var weight = _solveWeight;
         foreach (var arm in _arms)
         {
             for (int d = 0; d < Dofs.Length; d++)
             {
-                arm.Touched[d] += dt;
+                // Once input stops the optimisation problem must stop changing.
+                // Decaying priorities while blocked made the chosen detour drift.
+                if (!goalsStill) arm.Touched[d] += dt;
                 arm.Goal[d] += Mathf.Clamp(arm.Target[d] - arm.Goal[d], -step, step);
             }
-            // Aim at the nearest pose the anatomy allows.
-            var aim = (float[])arm.Goal.Clone();
-            Anatomy(aim);
+        }
+        Turn(TrunkTwist());
+        for (int k = 0; k < 2; k++)
+        {
+            var arm = _arms[k];
+            // The plane slider is measured from the front (the hips), the joint from the
+            // turned chest. Aim at the nearest pose the anatomy allows.
+            var aim = arm.Aim;
+            AimFor(k, arm.Goal, aim);
+            // Behind the back the sword arm aims at where the map says it can go.
+            if (k == 0)
+                ApplyBackMap(arm.Goal, aim);
             arm.Aim = aim;
         }
         for (int g = 0; g < n; g++)
@@ -668,8 +729,8 @@ public partial class JointLab : Node3D
         float Aim(int g) => _arms[Solved[g].Arm].Aim[Solved[g].Dof];
         // However far the best pose is, the arm moves there at no more than SlideSpeed, so
         // sliding round an obstacle is a visible motion, not a jump.
-        float reach = SlideSpeed * dt;
-        var frameStart = new float[n];
+        float reach = SlideSpeed * dt * (planning ? 4 : live ? LiveSpeedUp : 1);
+        var frameStart = _solveFrame;
         for (int g = 0; g < n; g++)
             frameStart[g] = Angles(g)[Solved[g].Dof];
         float Limit(int g, float value)
@@ -702,10 +763,33 @@ public partial class JointLab : Node3D
         }
         else
         {
+            // Free space: if the step straight towards the aim (within this frame's travel)
+            // meets nothing, take it without solving. Almost every frame of free movement ends
+            // here; only touching something costs the full solve below.
+            var straight = _solveStart;
+            for (int g = 0; g < n; g++) straight[g] = Get(g);
+            // A contact already there (a hand resting on the hip, a hair's breadth) is no reason
+            // to stop: the step is taken if it does not press in any further.
+            float already = Overlap(right, left);
+            for (int g = 0; g < n; g++) Set(g, Limit(g, Aim(g)));
+            Allowed();
+            // No deeper than before, or than the solver's own tolerance — never a little more
+            // each frame, which would let the arm creep into the body.
+            if (!planning && Overlap(right, left) <= Mathf.Max(already, 0.0002f))
+            {
+                _settled = true;
+                for (int g = 0; g < n; g++)
+                    if (Mathf.Abs(Get(g) - Aim(g)) > 0.01f) _settled = false;
+                _settlePath = "straight";
+                goto Solved;
+            }
+            for (int g = 0; g < n; g++) Set(g, straight[g]);
+            _settlePath = $"solve (straight overlap {Overlap(right, left):0.0000})";
+
             // Gauss-Newton on E = Σ w (a − aim)² + K·overlap², from where the arms are now.
             // The overlap term is rank one, so the normal equations solve in closed form.
             const float K = 1e8f;
-            float Energy()
+            float Energy(float knownOverlap = -1)
             {
                 float e = 0;
                 for (int g = 0; g < n; g++)
@@ -713,16 +797,20 @@ public partial class JointLab : Node3D
                     float off = Get(g) - Aim(g);
                     e += weight[g] * off * off;
                 }
-                float o = Overlap(right, left);
+                float o = knownOverlap >= 0 ? knownOverlap : Overlap(right, left);
                 return e + K * o * o;
             }
-            var gradient = new float[n];
-            var delta = new float[n];
-            var start = new float[n];
-            var b = new float[n];
+            var gradient = _solveGradient;
+            var delta = _solveDelta;
+            var start = _solveStart;
+            var b = _solveB;
             bool converged = false;
-            for (int iteration = 0; iteration < 6; iteration++)
+            // Live input carries on next frame from where this one stops, so it need not
+            // converge in one: fewer iterations keep its frames short.
+            int iterations = live ? 2 : 6, projections = live ? 3 : 6;
+            for (int iteration = 0; iteration < iterations; iteration++)
             {
+                CheckSearchDeadline();
                 float overlap = Overlap(right, left);
                 if (overlap > 0) OverlapGradient(right, left, 0, gradient);
                 else System.Array.Clear(gradient);
@@ -746,7 +834,7 @@ public partial class JointLab : Node3D
                     break;
                 }
                 float scale = Mathf.Min(1, 10 / largest);
-                float before = Energy();
+                float before = Energy(overlap);
                 for (int g = 0; g < n; g++)
                     start[g] = Get(g);
                 bool better = false;
@@ -755,7 +843,7 @@ public partial class JointLab : Node3D
                     for (int g = 0; g < n; g++)
                         Set(g, Limit(g, start[g] + delta[g] * scale));
                     Allowed();
-                    better = Energy() < before;
+                    better = Energy() < before - Mathf.Max(0.001f, before * 0.000001f);
                 }
                 if (!better)
                 {
@@ -768,7 +856,7 @@ public partial class JointLab : Node3D
             // What overlap the stiff penalty leaves (a few millimetres) is taken out by the
             // shortest weighted move to the surface; it starts from the settled pose, so it
             // lands in the same place frame after frame.
-            for (int iteration = 0; iteration < 6; iteration++)
+            for (int iteration = 0; iteration < projections; iteration++)
             {
                 float overlap = Overlap(right, left);
                 if (overlap < 0.0002f)
@@ -779,9 +867,23 @@ public partial class JointLab : Node3D
                     norm += gradient[g] * gradient[g] / weight[g];
                 if (norm < 1e-12f)
                     break;
-                for (int g = 0; g < n; g++)
-                    Set(g, Limit(g, Get(g) - overlap / norm * gradient[g] / weight[g]));
-                Allowed();
+                // A full projection can cross another contact surface, causing
+                // the next frame to push back. Accept only decreasing overlap.
+                for (int g = 0; g < n; g++) start[g] = Get(g);
+                bool reduced = false;
+                float fraction = 1;
+                for (int trial = 0; trial < 5; trial++, fraction *= 0.5f)
+                {
+                    for (int g = 0; g < n; g++)
+                        Set(g, Limit(g, start[g] - fraction * overlap / norm * gradient[g] / weight[g]));
+                    Allowed();
+                    if (Overlap(right, left) < overlap - 0.000001f) { reduced = true; break; }
+                }
+                if (!reduced)
+                {
+                    for (int g = 0; g < n; g++) Set(g, start[g]);
+                    break;
+                }
             }
             // Settled when the best pose was reached within this frame's travel.
             if (converged)
@@ -791,6 +893,14 @@ public partial class JointLab : Node3D
                     if (Mathf.Abs(Get(g) - frameStart[g]) > reach - 0.01f) _settled = false;
             }
         }
+    Solved:
+        float travel = 0;
+        for (int g = 0; g < n; g++) travel = Mathf.Max(travel, Mathf.Abs(Get(g) - frameStart[g]));
+        // Sub-degree numerical corrections at an unreachable target are not a
+        // new gesture. Cache the safe result until input or obstacles change.
+        _quietSolveFrames = goalsStill && !_footwork.Moving && travel < 0.03f
+            && Overlap(right, left) < 0.0002f ? _quietSolveFrames + 1 : 0;
+        if (_quietSolveFrames >= 4) _settled = true;
         ArmPose r = Pose(_arms[0], right), l = Pose(_arms[1], left);
         float between = Between(r, l, 0);
         _arms[0].Depth = Depth(_arms[0], r, 0) + between + SwordInBody(r, 0) + SwordInArms(r, l, 0);
@@ -799,20 +909,48 @@ public partial class JointLab : Node3D
 
     public override void _Process(double delta)
     {
-        Settle((float)delta);
+        Gamepad(Mathf.Min((float)delta, 0.05f));
+        BuildBackMap(3);
+        // Run independently of Settle's early exit: a foot must finish its step
+        // even after the arm sliders have already reached their goals.
+        if (_footwork.Update(float.IsFinite(_twist) ? _twist : Bladed, (float)delta))
+        {
+            foreach (var entry in _legIdle)
+                _legs.Move(entry.Key, _skeleton.GetBoneGlobalPose(entry.Key) * entry.Value.AffineInverse());
+            _settled = false;
+            if (_volumesShown != null) PlaceVolumes();
+        }
+        AdvancePlannedPose((float)delta);
+        // Search may have evaluated a very different pose. Diagnostics describe
+        // the displayed hands, never the last hidden candidate.
+        ArmPose displayedRight = Pose(_arms[0], _arms[0].Angles), displayedLeft = Pose(_arms[1], _arms[1].Angles);
+        float displayedBetween = Between(displayedRight, displayedLeft, 0);
+        _arms[0].Depth = Depth(_arms[0], displayedRight, 0) + displayedBetween
+            + SwordInBody(displayedRight, 0) + SwordInArms(displayedRight, displayedLeft, 0);
+        _arms[1].Depth = Depth(_arms[1], displayedLeft, 0) + displayedBetween;
         foreach (var arm in _arms)
         {
             float load = Load(arm.Angles);
-            arm.LoadLabel.Text = $"Нагрузка позы (LUBA): {load:0} — категория {Category(load)}";
+            arm.LoadLabel.Text = $"Нагрузка позы (LUBA): {load:0.0} — категория {Category(load)}"
+                + (OverheadGripStrain(arm.Angles) > 0.1f ? " · неудобный хват над головой" : "");
             arm.LoadLabel.Modulate = load <= 5 ? new Color(0.6f, 1, 0.6f) : load <= 12 ? new Color(1, 1, 0.7f)
                 : load <= 25 ? new Color(1, 0.75f, 0.45f) : new Color(1, 0.45f, 0.4f);
         }
-        foreach (var arm in _arms)
+        for (int k = 0; k < 2; k++)
+        {
+            var arm = _arms[k];
             for (int d = 0; d < Dofs.Length; d++)
             {
-                float target = arm.Target[d], actual = arm.Angles[d];
+                float target = arm.Target[d], actual = d == 0 ? FromFront(k, arm.Angles[0]) : arm.Angles[d];
                 arm.Values[d].Text = Mathf.Abs(target - actual) > 0.5f ? $"{target:0}° → {actual:0}°" : $"{actual:0}°";
             }
+        }
+        float trunk = Score(Mathf.Abs(_twist), TrunkRotation), neck = Score(Mathf.Abs(_twist), NeckRotation);
+        _trunkLabel.Text = $"Повёрнут на {_twist:0}° (правое плечо вперёд +), голова назад на {-_twist:0}°.\n"
+            + $"Нагрузка LUBA: корпус {trunk:0}, шея {neck:0}.";
+        _pathLabel.Text = "Путь руки: " + (PlanningPose ? "расчёт — текущая поза удерживается" : SearchTimedOut
+            ? "лимит поиска — прежняя поза сохранена" : PosePathBlocked
+            ? "безопасный путь не найден — измени целевую позу" : FollowingPosePath ? "движение по проверенному пути" : "свободно");
         Apply();
     }
 
@@ -822,7 +960,7 @@ public partial class JointLab : Node3D
         foreach (var arm in _arms)
         {
             var p = Pose(arm, arm.Angles);
-            Basis parent = _skeleton.GetBoneGlobalPose(_skeleton.GetBoneParent(arm.Clavicle)).Basis;
+            Basis parent = _trunkIdle[_spine2].Basis; // the clavicle hangs from the chest; worked out unturned
             _skeleton.SetBonePoseRotation(arm.Clavicle, (parent.Inverse() * p.Clavicle).GetRotationQuaternion());
             _skeleton.SetBonePoseRotation(arm.Upper, (p.Clavicle.Inverse() * p.Upper).GetRotationQuaternion());
             _skeleton.SetBonePoseRotation(arm.Fore, (p.Upper.Inverse() * p.Fore).GetRotationQuaternion());
@@ -830,7 +968,7 @@ public partial class JointLab : Node3D
         }
         var right = Pose(_arms[0], _arms[0].Angles);
         Transform3D sword = SwordFrame(right);
-        _sword.GlobalTransform = _skeleton.GlobalTransform * new Transform3D(sword.Basis.Scaled(Vector3.One * FighterPose.SwordScale), sword.Origin);
+        _sword.GlobalTransform = _skeleton.GlobalTransform * _turn * new Transform3D(sword.Basis.Scaled(Vector3.One * FighterPose.SwordScale), sword.Origin);
         // The fingers only need closing again when the sword arm has moved.
         bool moved = false;
         for (int d = 0; d < Dofs.Length; d++)
@@ -850,6 +988,24 @@ public partial class JointLab : Node3D
     /// of passing through it.
     /// </summary>
     private void WrapFingers(Transform3D hand, Transform3D sword)
+    {
+        // The sword sits rigidly in the hand, so the fist round it is the same in every pose:
+        // worked out once, then only laid on again.
+        if (_fist.Count > 0)
+        {
+            foreach (var (bone, rotation) in _fist)
+                _skeleton.SetBonePoseRotation(bone, rotation);
+            return;
+        }
+        WorkOutFist(hand, sword);
+        foreach (var finger in _fingers)
+            foreach (int bone in finger.Bones)
+                _fist[bone] = _skeleton.GetBonePoseRotation(bone);
+    }
+
+    private readonly Dictionary<int, Quaternion> _fist = new();
+
+    private void WorkOutFist(Transform3D hand, Transform3D sword)
     {
         Vector3 axisPoint = sword.Origin, axis = sword.Basis.Y.Normalized();
         float DistanceToAxis(Vector3 p)
@@ -1089,11 +1245,66 @@ public partial class JointLab : Node3D
             ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
         };
         foreach (var shape in _body.Shapes)
-            _volumesShown.AddChild(new MeshInstance3D
-            {
-                Mesh = new SphereMesh { Radius = 1, Height = 2, Material = material },
-                Transform = shape.Frame * Transform3D.Identity.Scaled(shape.Semi),
-            });
+            _volumesShown.AddChild(new MeshInstance3D { Mesh = new SphereMesh { Radius = 1, Height = 2, Material = material } });
+        PlaceVolumes();
+    }
+
+    private void PlaceVolumes()
+    {
+        for (int i = 0; i < _body.Shapes.Count; i++)
+            ((Node3D)_volumesShown.GetChild(i)).Transform = _body.Shapes[i].Frame * Transform3D.Identity.Scaled(_body.Shapes[i].Semi);
+    }
+
+    /// <summary>
+    /// How far the trunk turns: bladed by default, then with the sword arm — half of how far
+    /// its plane is from the comfortable 45°, so a cut wound up behind turns the chest back and
+    /// one from the left turns it round. Hardly at all while the arm hangs (its plane means
+    /// little then). The thoracolumbar spine turns some 40–60° each way.
+    /// </summary>
+    private float TrunkTwist() => TrunkTwist(_arms[0].Goal);
+
+    private static float TrunkTwist(float[] goal)
+    {
+        float raised = Mathf.Clamp(goal[1] / 45, 0, 1);
+        return Mathf.Clamp(Bladed + TwistShare * (goal[0] - 45) * raised, TwistMin, TwistMax);
+    }
+
+    /// <summary>The plane of elevation measured from the chest, for one measured from the front, and back.</summary>
+    // The sword arm's plane is measured from the front (the hips): the trunk turning to help
+    // it must not move where the sword points. The free arm's is measured from the chest: it
+    // turns with the trunk, as a free arm does, and stays still while only the trunk moves.
+    private float FromChest(int arm, float plane) => arm == 0 ? plane - _twist : plane;
+    private float FromFront(int arm, float plane) => arm == 0 ? plane + _twist : plane;
+
+    /// <summary>
+    /// Turns the trunk: the lower spine takes 40%, the chest the rest; the neck and head turn
+    /// back so the eyes stay on the opponent. The volumes of the turned bones go with them.
+    /// </summary>
+    private void Turn(float twist)
+    {
+        if (twist == _twist)
+            return;
+        _twist = twist;
+        float t = Mathf.DegToRad(twist);
+        var turned = new Dictionary<int, Basis>
+        {
+            [_spine1] = new Basis(_twistAxis, 0.4f * t) * _trunkIdle[_spine1].Basis,
+            [_spine2] = new Basis(_twistAxis, t) * _trunkIdle[_spine2].Basis,
+            [_neck] = new Basis(_twistAxis, 0.4f * t) * _trunkIdle[_neck].Basis,
+            [_head] = _trunkIdle[_head].Basis,
+        };
+        foreach (int bone in new[] { _spine1, _spine2, _neck, _head })
+        {
+            int parent = _skeleton.GetBoneParent(bone);
+            Basis parentBasis = turned.TryGetValue(parent, out Basis b) ? b : _skeleton.GetBoneGlobalPose(parent).Basis;
+            _skeleton.SetBonePoseRotation(bone, (parentBasis.Inverse() * turned[bone]).GetRotationQuaternion());
+        }
+        foreach (int bone in new[] { _spine1, _spine2, _neck, _head })
+            _body.Move(bone, _skeleton.GetBoneGlobalPose(bone) * _trunkIdle[bone].AffineInverse());
+        _turn = _skeleton.GetBoneGlobalPose(_spine2) * _trunkIdle[_spine2].AffineInverse();
+        if (_volumesShown != null)
+            PlaceVolumes();
+        _settled = false;
     }
 
     /// <summary>For screenshots: leave the camera where it was put.</summary>
@@ -1146,7 +1357,7 @@ public partial class JointLab : Node3D
         var panel = new PanelContainer
         {
             AnchorLeft = 1, AnchorRight = 1, AnchorBottom = 1,
-            OffsetLeft = -470, OffsetRight = -8, OffsetTop = 8, OffsetBottom = -8,
+            OffsetLeft = -560, OffsetRight = -8, OffsetTop = 8, OffsetBottom = -8,
         };
         layer.AddChild(panel);
         var scroll = new ScrollContainer { HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
@@ -1172,19 +1383,28 @@ public partial class JointLab : Node3D
         // nothing painful, and clear of the body, the other arm and the sword.
         float[] Draw(int arm, float[] other)
         {
+            // Drawn as the sliders are (plane from the front), checked as the joints are (plane
+            // from the chest, at the turn the trunk will take for it).
+            float before = _twist;
             var a = new float[Dofs.Length];
-            for (int attempt = 0; attempt < 500; attempt++)
+            for (int attempt = 0; attempt < 300; attempt++)
             {
                 for (int d = 0; d < Dofs.Length; d++)
                     a[d] = rng.RandfRange(Dofs[d].Min, Dofs[d].Max);
-                var allowed = (float[])a.Clone();
+                Turn(TrunkTwist(arm == 0 ? a : other));
+                float[] joints = (float[])a.Clone(), otherJoints = (float[])other.Clone();
+                joints[0] = FromChest(arm, a[0]);
+                otherJoints[0] = FromChest(1 - arm, other[0]);
+                var allowed = (float[])joints.Clone();
                 Anatomy(allowed);
                 bool inside = true;
                 for (int d = 0; d < Dofs.Length; d++)
-                    if (Mathf.Abs(allowed[d] - a[d]) > 0.5f) inside = false;
-                if (inside && Pain(a) == 0 && Load(a) <= 12 && Overlap(arm == 0 ? a : other, arm == 0 ? other : a) == 0)
-                    return a;
+                    if (Mathf.Abs(allowed[d] - joints[d]) > 0.5f) inside = false;
+                if (inside && Pain(joints) == 0 && Load(joints) <= 12
+                    && Overlap(arm == 0 ? joints : otherJoints, arm == 0 ? otherJoints : joints) == 0)
+                    break;
             }
+            Turn(before);
             return a;
         }
         void Show(int arm, float[] a)
@@ -1219,6 +1439,13 @@ public partial class JointLab : Node3D
         var volumes = new CheckBox { Text = "Объёмы тела" };
         volumes.Toggled += on => _volumesShown.Visible = on;
         toggles.AddChild(volumes);
+        var left = BuildPadPanel(layer);
+        left.AddChild(new Label { Text = "КОРПУС" });
+        // Fixed room for each line: text appearing or going must not shift anything.
+        _trunkLabel = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart, CustomMinimumSize = new Vector2(380, 46) };
+        left.AddChild(_trunkLabel);
+        _pathLabel = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart, CustomMinimumSize = new Vector2(380, 46) };
+        left.AddChild(_pathLabel);
         AddSlider(list, "Камера", "", -180, 180, _orbit, value => { _orbit = value; PlaceCamera(); }, out _, out _);
         for (int i = 0; i < 2; i++)
         {
@@ -1264,6 +1491,7 @@ public partial class JointLab : Node3D
 
     /// <summary>For tests and screenshots: set one angle (clamped to the model's range).</summary>
     public float Orbit { get => _orbit; set => _orbit = value; }
+    public float Target(int arm, int dof) => _arms[arm].Target[dof];
     public float Angle(int arm, int dof) => _arms[arm].Angles[dof];
     public float ArmDepth(int arm) => _arms[arm].Depth;
     public float ArmLoad(int arm) => Load(_arms[arm].Angles);

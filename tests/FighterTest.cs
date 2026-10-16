@@ -13,6 +13,7 @@ public partial class FighterTest : Node
             TestFollowsThePad();
             TestBodyLimits();
             TestFootwork();
+            TestStanceSteps();
             TestStrike();
             TestDummy();
             GD.Print("PASS fighter: blade follows the pad, the sword hand on the grip, the free hand joins when it can, joint limits, own body, footwork, strike, dummy.");
@@ -134,6 +135,39 @@ public partial class FighterTest : Node
         for (int i = 0; i < 2; i++)
             Check(!fighter.Stepping(i), "Feet did not settle after walking");
         arena.QueueFree();
+    }
+
+    private void TestStanceSteps()
+    {
+        foreach (int fps in new[] { 30, 60, 144 })
+        {
+            var (arena, fighter) = Make();
+            Vector3 root = fighter.GlobalPosition;
+            int steps = 0;
+            for (int frame = 0; frame < fps * 5; frame++)
+            {
+                float time = (float)frame / fps;
+                var before = new[] { fighter.FootPosition(0), fighter.FootPosition(1) };
+                var moving = new[] { fighter.Stepping(0), fighter.Stepping(1) };
+                Vector2 stick = time < 1.5f ? new Vector2(1, 0) : time < 3 ? new Vector2(-1, 0) : Vector2.Zero;
+                fighter.Drive(Vector2.Zero, stick, Vector3.Zero, time >= 3 ? 1 : 0, 1f / fps);
+                Check(!(fighter.Stepping(0) && fighter.Stepping(1)), "Both support feet lifted together");
+                for (int i = 0; i < 2; i++)
+                {
+                    if (!moving[i] && fighter.Stepping(i)) steps++;
+                    if (!moving[i] && !fighter.Stepping(i))
+                        Check(before[i].IsEqualApprox(fighter.FootPosition(i)), "Support foot slid during a body turn");
+                }
+            }
+            Check(steps >= 2, $"Body motion did not reposition feet at {fps} FPS: {steps}");
+            Check(fighter.GlobalPosition.DistanceTo(root) < 0.001f, "Stance steps moved the player root");
+            Hold(fighter, Vector2.Zero, Vector3.Zero, 0, 120);
+            var planted = new[] { fighter.FootPosition(0), fighter.FootPosition(1) };
+            Hold(fighter, Vector2.Zero, Vector3.Zero, 0, 60);
+            for (int i = 0; i < 2; i++)
+                Check(!fighter.Stepping(i) && planted[i].IsEqualApprox(fighter.FootPosition(i)), "Idle stance kept shuffling");
+            arena.QueueFree();
+        }
     }
 
     private void TestStrike()

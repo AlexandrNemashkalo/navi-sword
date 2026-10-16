@@ -1,0 +1,272 @@
+using Godot;
+
+/// <summary>
+/// The gamepad drives the sword arm in the joint lab.
+///
+/// Normal: the gyro is the shoulder — tilt the pad's nose up/down to raise/lower the arm,
+/// turn it left/right to carry the arm across or out, roll it to turn the arm in the
+/// shoulder. The right stick is the elbow (down bends it) and the forearm's turn; let go and
+/// they return to the guard. R2 straightens the elbow smoothly (a thrust or the end of a cut).
+///
+/// Hold L1 for fine work: the shoulder stays put and the gyro moves the forearm from where it
+/// was — tilt bends the elbow, turn swings the forearm by turning the arm in the shoulder,
+/// roll turns the forearm — while the right stick bends and tilts the hand.
+///
+/// Every change of mode picks up from where the arm is, so nothing jumps. R1 takes the pad's
+/// present attitude as the guard; △ calibrates the gyro (pad on the table).
+/// </summary>
+public partial class JointLab
+{
+    private int _device = -1;
+    private float _scanIn, _calibrating;
+    private bool _centred, _fine, _resetHeld, _calibrateHeld;
+    private readonly SwordMotionModel _motion = new();
+    /// <summary>
+    /// The pad's attitude is smoothed by a 1€ filter (Casiez et al. 2012), as in the fight:
+    /// held still, the sensor's noise and the hand's tremor are filtered out strongly; moved
+    /// fast, it lets the motion through with hardly any delay. Without it the noise, times the
+    /// gains, shook the arm all the time.
+    /// </summary>
+    private readonly OneEuroFilter _padFilter = new(minCutoff: 1.2f, beta: 0.5f, derivativeCutoff: 1.0f);
+    /// <summary>Pad attitude (degrees: nose up, turned right, rolled right) that maps to the guard.</summary>
+    private Vector3 _padCentre;
+    /// <summary>Where the stick-driven joints rest with the stick let go.</summary>
+    private float _elbowRest = GuardElbow, _turnRest;
+    /// <summary>The arm and the pad when L1 went down.</summary>
+    private readonly float[] _held = new float[7];
+    private Vector3 _padHeld;
+    private Label _padStatus = null!, _padValues = null!, _padHelp = null!;
+
+    /// <summary>The guard the pad's centre stands for: arm forward and a little up, elbow bent.</summary>
+    private const float GuardPlane = 80, GuardElevation = 45, GuardElbow = 70;
+    /// <summary>Degrees of joint per degree of pad: a comfortable wrist turn covers the arm's range.</summary>
+    private const float ShoulderGain = 1.5f, TwistGain = 1.2f, ForearmGain = 1.5f;
+    /// <summary>Turning the pad left/right carries the arm across or out: the wrist turns less
+    /// far that way, so it moves the shoulder further — 40° of pad takes the arm from the
+    /// front right round behind.</summary>
+    private const float SwingGain = 2.5f;
+
+    /// <summary>The left panel: the gamepad's state and live readings. Returns its list, for the trunk's lines below.</summary>
+    private VBoxContainer BuildPadPanel(CanvasLayer layer)
+    {
+        var panel = new PanelContainer { OffsetLeft = 8, OffsetTop = 8, OffsetRight = 400 };
+        layer.AddChild(panel);
+        var list = new VBoxContainer();
+        panel.AddChild(list);
+        list.AddChild(new Label { Text = "ГЕЙМПАД" });
+        // Each line keeps its room whatever it says, so nothing below it jumps.
+        Label Line(int lines)
+        {
+            var label = new Label
+            {
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+                CustomMinimumSize = new Vector2(380, 23 * lines),
+                VerticalAlignment = VerticalAlignment.Top,
+            };
+            list.AddChild(label);
+            return label;
+        }
+        _padStatus = Line(2);
+        _padValues = Line(7);
+        _padHelp = Line(6);
+        _padHelp.Modulate = new Color(1, 1, 1, 0.6f);
+        _mapLabel = Line(1);
+        list.AddChild(new HSeparator());
+        return list;
+    }
+
+    private bool Pressed(JoyButton button) => _device >= 0 && Input.IsJoyButtonPressed(_device, button);
+
+    private void Status(string text, Color colour)
+    {
+        _padStatus.Text = text;
+        _padStatus.Modulate = colour;
+    }
+
+    private static readonly Color Waiting = new(1, 0.85f, 0.5f), Working = new(0.6f, 1, 0.6f), Missing = new(1, 0.55f, 0.5f);
+
+    private void Gamepad(float dt)
+    {
+        _scanIn -= dt;
+        if (_scanIn <= 0)
+        {
+            _scanIn = 0.5f;
+            int found = -1;
+            foreach (int id in Input.GetConnectedJoypads())
+                if (found < 0 || Input.HasJoyMotionSensors(id) && !Input.HasJoyMotionSensors(found))
+                    found = id;
+            if (found != _device)
+            {
+                _device = found;
+                _centred = false;
+                if (_device >= 0 && Input.HasJoyMotionSensors(_device))
+                {
+                    // The sensors are off until asked for; then a short calibration at rest.
+                    Input.SetJoyMotionSensorsEnabled(_device, true);
+                    Input.StartJoyMotionSensorsCalibration(_device);
+                    _calibrating = 2;
+                }
+            }
+        }
+        _padHelp.Text = "Обычно: гироскоп — плечо; стик ↑↓ — локоть, ←→ — поворот предплечья; R2 — разогнуть локоть.\n"
+            + "Держи L1: гироскоп — предплечье, стик — кисть.\nR1 — центр (средняя стойка), △ — калибровка.";
+        if (_device < 0)
+        {
+            Status("Геймпад не найден. Рукой управляют ползунки справа.", Missing);
+            _padValues.Text = "";
+            return;
+        }
+        string name = Input.GetJoyName(_device);
+        if (!Input.HasJoyMotionSensors(_device))
+        {
+            Status($"{name}: у этого геймпада нет гироскопа (или Godot его не видит).", Missing);
+            _padValues.Text = "";
+            return;
+        }
+        Vector3 raw = Input.GetJoyGyroscope(_device);
+        string rawLine = $"Гироскоп, скорость вращения: {Mathf.RadToDeg(raw.Length()):0} °/с"
+            + "  (покрути геймпад — число должно меняться)";
+        if (_calibrating > 0)
+        {
+            _calibrating -= dt;
+            Status($"{name}: калибровка — положи геймпад на стол и не трогай ({_calibrating:0.0} с).", Waiting);
+            _padValues.Text = rawLine;
+            if (_calibrating <= 0)
+            {
+                Input.StopJoyMotionSensorsCalibration(_device);
+                _centred = false;
+            }
+            return;
+        }
+        bool calibrate = Pressed(JoyButton.Y);
+        if (calibrate && !_calibrateHeld)
+        {
+            Input.StartJoyMotionSensorsCalibration(_device);
+            _calibrating = 2;
+        }
+        _calibrateHeld = calibrate;
+
+        bool reset = Pressed(JoyButton.RightShoulder);
+        if (reset && !_resetHeld)
+        {
+            _motion.Recenter(Input.GetJoyGravity(_device));
+            _padFilter.Reset();
+            _padCentre = Vector3.Zero;
+            _elbowRest = GuardElbow;
+            _turnRest = 0;
+            _fine = false;
+            _centred = true;
+        }
+        _resetHeld = reset;
+        if (!_centred)
+        {
+            Status($"{name}: возьми геймпад, как держишь меч в средней стойке, и нажми R1.", Waiting);
+            _padValues.Text = rawLine;
+            return;
+        }
+
+        _motion.Update(raw, Input.GetJoyGravity(_device), Input.GetJoyAccelerometer(_device), dt, 2.0f, 1.8f);
+        Vector3 gesture = SwordMotionModel.ForearmGesture(_motion.Attitude);
+        // Degrees: nose up +, turned right +, rolled right +.
+        Vector3 pad = new(Mathf.RadToDeg(gesture.X), Mathf.RadToDeg(gesture.Y), -Mathf.RadToDeg(gesture.Z));
+        Vector2 stick = SwordArmRig.StickResponse(new Vector2(Input.GetJoyAxis(_device, JoyAxis.RightX), Input.GetJoyAxis(_device, JoyAxis.RightY)));
+        float straighten = Mathf.Clamp(Input.GetJoyAxis(_device, JoyAxis.TriggerRight), 0, 1);
+        bool fine = Pressed(JoyButton.LeftShoulder);
+        Vector3 p = DrivePadFor(pad, stick, straighten, fine, dt);
+
+        Status(fine ? $"{name}: работает — L1, предплечье и кисть." : $"{name}: работает — плечо.", Working);
+        string what = fine ? "от нажатия L1" : "от центра (R1)";
+        _padValues.Text = rawLine + "\n"
+            + $"Наклон носом вверх: {p.X,5:0}°  {what}\n"
+            + $"Поворот вправо:     {p.Y,5:0}°\n"
+            + $"Крен вправо:        {p.Z,5:0}°\n"
+            + $"Правый стик: ←→ {stick.X,5:0.00}   ↑↓ {stick.Y,5:0.00}\n"
+            + $"R2 (разогнуть локоть): {straighten:0.00}";
+    }
+
+    /// <summary>
+    /// The pad's attitude (degrees: nose up, turned right, rolled right), the right stick, R2
+    /// and L1, to where the sword arm should go. Written to the targets directly, in full
+    /// precision (the sliders, in whole degrees, only show them). Returns the pad's attitude
+    /// from its centre (or from where L1 went down). Public so tests can play a pad.
+    /// </summary>
+    public Vector3 DrivePad(Vector3 pad, Vector2 stick, float straighten, bool fine)
+        => DrivePadFor(pad, stick, straighten, fine, 1f / 60);
+
+    private Vector3 DrivePadFor(Vector3 pad, Vector2 stick, float straighten, bool fine, float dt)
+    {
+        // Filtered in radians, the units its settings are tuned in.
+        pad = _padFilter.Filter(pad * (Mathf.Pi / 180), dt) * (180 / Mathf.Pi);
+        float[] t = _arms[0].Target;
+        var want = (float[])t.Clone();
+        if (fine && !_fine)
+        {
+            t.CopyTo(_held, 0);
+            _padHeld = pad;
+        }
+        else if (!fine && _fine)
+        {
+            // Back to the shoulder: the pad's present attitude stands for where the arm is now,
+            // and the stick's rest for where the elbow and forearm are now.
+            _padCentre = pad - new Vector3((t[1] - GuardElevation) / ShoulderGain, -(t[0] - GuardPlane) / SwingGain, -t[2] / TwistGain);
+            _elbowRest = t[3] - 60 * stick.Y;
+            _turnRest = t[4] + 80 * stick.X;
+        }
+        _fine = fine;
+
+        Vector3 p;
+        if (!fine)
+        {
+            p = pad - _padCentre;
+            want[0] = GuardPlane - SwingGain * p.Y;        // turned right: the arm goes out to the side
+            want[1] = GuardElevation + ShoulderGain * p.X; // nose up: the arm rises
+            want[2] = -TwistGain * p.Z;                    // rolled right: the arm turns outward
+            want[3] = _elbowRest + 60 * stick.Y;           // stick down bends the elbow
+            want[4] = _turnRest - 80 * stick.X;            // stick right turns the palm up
+        }
+        else
+        {
+            p = pad - _padHeld;
+            want[3] = _held[3] + ForearmGain * p.X;        // nose up lifts the forearm: the elbow bends
+            want[2] = _held[2] - ForearmGain * p.Y;        // turned right swings the forearm out
+            want[4] = _held[4] - ForearmGain * p.Z;        // rolled right turns the palm up
+            want[5] = _held[5] + 45 * stick.Y;             // stick down bends the hand to the palm
+            want[6] = _held[6] + 17 * stick.X;             // stick right tilts it to the thumb
+        }
+        want[3] = Mathf.Lerp(want[3], 0, straighten);
+
+        for (int d = 0; d < Dofs.Length; d++)
+        {
+            float value = Mathf.Clamp(want[d], Dofs[d].Min, Dofs[d].Max);
+            if (value == t[d])
+                continue;
+            t[d] = value;
+            _arms[0].Touched[d] = 0;
+            _arms[0].Sliders[d].SetValueNoSignal(value);
+            _arms[0].Values[d].Text = $"{value:0}°";
+        }
+        return p;
+    }
+
+    /// <summary>For tests: the arm's plane of elevation as the slider measures it (from the front).</summary>
+    public float PlaneFromFront(int arm) => FromFront(arm, _arms[arm].Angles[0]);
+    /// <summary>For tests: the plane the arm is heading for, after the anatomy's limits.</summary>
+    public float ReachablePlane(int arm) => FromFront(arm, _arms[arm].Aim[0]);
+
+    /// <summary>For profiling: close the fingers on the grip now, as a moving arm does each frame.</summary>
+    public void ForceWrap()
+    {
+        var right = Pose(_arms[0], _arms[0].Angles);
+        WrapFingers(new Transform3D(right.Palm, right.Wrist), SwordFrame(right));
+    }
+
+    /// <summary>For tests: the pad is centred (as R1 does), without a device.</summary>
+    public void CentrePad()
+    {
+        _padFilter.Reset();
+        _padCentre = Vector3.Zero;
+        _elbowRest = GuardElbow;
+        _turnRest = 0;
+        _fine = false;
+    }
+}

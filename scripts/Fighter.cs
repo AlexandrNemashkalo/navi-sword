@@ -59,6 +59,8 @@ public partial class Fighter : Node3D
     // Feet stand in the world and step when the body walks or turns away from them.
     private Transform3D[] _footRest = new Transform3D[2], _footWorld = new Transform3D[2], _stepFrom = new Transform3D[2];
     private readonly float[] _stepTime = { -1, -1 };
+    private readonly Transform3D[] _stepTo = new Transform3D[2];
+    private float _stepPause;
     private const float StepHeight = 0.07f, StepLead = 0.22f;
     public bool Stepping(int foot) => _stepTime[foot] >= 0;
     public Vector3 FootPosition(int foot) => _footWorld[foot].Origin;
@@ -145,6 +147,7 @@ public partial class Fighter : Node3D
         System.Array.Clear(_trunk);
         System.Array.Clear(_trunkVelocity);
         Trunk = default;
+        _stepPause = 0;
         for (int i = 0; i < 2; i++) { _footWorld[i] = GlobalTransform * _footRest[i]; _stepTime[i] = -1; }
         PlaceFeet();
         StrikeAmount = EdgeTwist = _strikeHold = 0;
@@ -243,7 +246,6 @@ public partial class Fighter : Node3D
             Shift = new Vector3(_trunk[3], _trunk[4], _trunk[5]), Shrug = _trunk[6],
         };
 
-        UpdateFeet(dt);
         // The free hand joins the grip when it comfortably can, and lets go when it can't.
         Pose.LeftHold = Mathf.MoveToward(Pose.LeftHold, Pose.LeftCanHold ? 1 : 0, 5 * dt);
 
@@ -294,6 +296,8 @@ public partial class Fighter : Node3D
         Hilt = hilt;
         Trunk = trunk;
 
+        // Use the accepted pose, not the requested pose rejected by sword contact.
+        UpdateFeet(dt);
         UpdateStrike(dt);
         Pose.Apply(Trunk, Blade, Hilt, EdgeTwist);
         UpdateContact(dt);
@@ -302,15 +306,22 @@ public partial class Fighter : Node3D
     private Transform3D FootTarget(int i)
     {
         // A big trunk turn pivots the feet after the hips instead of wringing the knees.
-        float hips = 0.3f * _trunk[0];
-        float pivot = Mathf.Sign(hips) * Mathf.Max(0, Mathf.Abs(hips) - Mathf.DegToRad(10)) * 0.8f;
-        Transform3D target = GlobalTransform * new Transform3D(new Basis(Vector3.Up, pivot), Vector3.Zero) * _footRest[i];
+        float pivot = Mathf.Sign(Trunk.Twist) * Mathf.Max(0, Mathf.Abs(Trunk.Twist) - Mathf.DegToRad(12)) * 0.65f;
+        Vector3 shift = Trunk.Shift with { Y = 0 };
+        // A forward weight transfer lengthens the stance with the leading foot;
+        // the rear foot remains a support rather than sliding both feet forwards.
+        shift.Z *= i == 1 ? 1.5f : 0.25f;
+        shift.X *= 0.8f;
+        Transform3D target = GlobalTransform * new Transform3D(new Basis(Vector3.Up, pivot), shift) * _footRest[i];
         target.Origin += (Movement.Velocity with { Y = 0 }) * StepLead;
+        // The arena is flat; preserve the authored ankle height above its floor.
+        target.Origin = target.Origin with { Y = (GlobalTransform * _footRest[i]).Origin.Y };
         return target;
     }
 
     private void UpdateFeet(float dt)
     {
+        _stepPause = Mathf.Max(0, _stepPause - dt);
         bool moving = (Movement.Velocity with { Y = 0 }).Length() > 0.05f;
         float brisk = Mathf.Clamp(Movement.Velocity.Length() / 1.3f, 0, 1);
         float[] error = new float[2];
@@ -327,16 +338,18 @@ public partial class Fighter : Node3D
             {
                 _stepTime[i] += dt / Mathf.Lerp(0.3f, 0.2f, brisk);
                 float t = Mathf.Min(_stepTime[i], 1), blend = t * t * (3 - 2 * t);
-                Transform3D target = FootTarget(i);
+                // Commit the landing at take-off, so a reversing cut cannot drag
+                // the airborne foot around or make it chase a moving target forever.
+                Transform3D target = _stepTo[i];
                 _footWorld[i] = new Transform3D(new Basis(_stepFrom[i].Basis.GetRotationQuaternion().Slerp(target.Basis.GetRotationQuaternion(), blend)),
                     _stepFrom[i].Origin.Lerp(target.Origin, blend) + Vector3.Up * StepHeight * Mathf.Sin(Mathf.Pi * t));
-                if (t >= 1) _stepTime[i] = -1;
+                if (t >= 1) { _stepTime[i] = -1; _stepPause = moving ? 0 : 0.08f; }
                 continue;
             }
-            bool overstretched = error[i] > 0.28f;
-            if (error[i] > (moving ? 0.1f : 0.04f) && (!Stepping(1 - i) || _stepTime[1 - i] > 0.5f || overstretched))
+            if (error[i] > (moving ? 0.1f : 0.055f) && !Stepping(1 - i) && _stepPause <= 0)
             {
                 _stepFrom[i] = _footWorld[i];
+                _stepTo[i] = FootTarget(i);
                 _stepTime[i] = 0;
             }
         }
