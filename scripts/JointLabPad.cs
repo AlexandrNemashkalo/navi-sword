@@ -169,7 +169,7 @@ public partial class JointLab
         Vector3 gesture = SwordMotionModel.ForearmGesture(_motion.Attitude);
         // Degrees: nose up +, turned right +, rolled right +.
         Vector3 pad = new(Mathf.RadToDeg(gesture.X), Mathf.RadToDeg(gesture.Y), -Mathf.RadToDeg(gesture.Z));
-        Vector2 stick = SwordArmRig.StickResponse(new Vector2(Input.GetJoyAxis(_device, JoyAxis.RightX), Input.GetJoyAxis(_device, JoyAxis.RightY)));
+        Vector2 stick = StickResponse(new Vector2(Input.GetJoyAxis(_device, JoyAxis.RightX), Input.GetJoyAxis(_device, JoyAxis.RightY)));
         float straighten = Mathf.Clamp(Input.GetJoyAxis(_device, JoyAxis.TriggerRight), 0, 1);
         bool fine = Pressed(JoyButton.LeftShoulder);
         Vector3 p = DrivePadFor(pad, stick, straighten, fine, dt);

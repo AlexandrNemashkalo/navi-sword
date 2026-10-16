@@ -120,7 +120,7 @@ public partial class JointLab : Node3D
         model.Rotation = new Vector3(0, Mathf.Pi, 0);
         AddChild(model);
         foreach (Node node in model.FindChildren("*", "MeshInstance3D", true, false))
-            Fighter.FlipNormals((MeshInstance3D)node);
+            FlipNormals((MeshInstance3D)node);
         _skeleton = (Skeleton3D)model.FindChild("Skeleton3D", true, false);
         var bodyMesh = (MeshInstance3D)model.FindChildren("*", "MeshInstance3D", true, false)[0];
         var animation = (AnimationPlayer)model.FindChild("AnimationPlayer", true, false);
@@ -209,11 +209,11 @@ public partial class JointLab : Node3D
             Vector3 palmward = (curl - across * curl.Dot(across) - distal * curl.Dot(distal)).Normalized();
             float finger = Mathf.Min(0.012f, _body.Radius(Bone("middle_02.r"), At("middle_02.r"), At("middle_03.r")));
             // Deep in the palm, at the palm crease below the finger bases, not at the fingers.
-            _palm = knuckles + palmward * (GripRadius * FighterPose.SwordScale + finger) - distal * PalmDepth;
+            _palm = knuckles + palmward * (GripRadius * SwordScale + finger) - distal * PalmDepth;
             Vector3 edge = (distal - along * distal.Dot(along)).Normalized();
             _grip = new Basis(edge, along, edge.Cross(along).Normalized()).Orthonormalized();
         }
-        _sword = Fighter.MakeSword(twoHanded: false);
+        _sword = MakeSword();
         AddChild(_sword);
         // The fingers' hinges, from the closed fist: each joint bends the way the fist is curled.
         foreach (string name in new[] { "index", "middle", "ring", "thumb" })
@@ -385,15 +385,15 @@ public partial class JointLab : Node3D
     {
         Basis basis = (right.Palm * _grip).Orthonormalized();
         Vector3 palm = right.Wrist + right.Palm * _palm;
-        return new Transform3D(basis, palm - basis.Y * (FistAt * FighterPose.SwordScale));
+        return new Transform3D(basis, palm - basis.Y * (FistAt * SwordScale));
     }
 
-    private Vector3 SwordPoint(Transform3D sword, float y) => sword.Origin + sword.Basis.Y * (y * FighterPose.SwordScale);
+    private Vector3 SwordPoint(Transform3D sword, float y) => sword.Origin + sword.Basis.Y * (y * SwordScale);
 
     /// <summary>The crossguard's two ends.</summary>
     private (Vector3, Vector3) Guard(Transform3D sword)
     {
-        Vector3 centre = SwordPoint(sword, GuardAt), across = sword.Basis.X * (GuardReach * FighterPose.SwordScale);
+        Vector3 centre = SwordPoint(sword, GuardAt), across = sword.Basis.X * (GuardReach * SwordScale);
         return (centre - across, centre + across);
     }
 
@@ -1072,7 +1072,7 @@ public partial class JointLab : Node3D
         }
         var right = Pose(_arms[0], _arms[0].Angles);
         Transform3D sword = SwordFrame(right);
-        _sword.GlobalTransform = _skeleton.GlobalTransform * _turn * new Transform3D(sword.Basis.Scaled(Vector3.One * FighterPose.SwordScale), sword.Origin);
+        _sword.GlobalTransform = _skeleton.GlobalTransform * _turn * new Transform3D(sword.Basis.Scaled(Vector3.One * SwordScale), sword.Origin);
         // The fingers only need closing again when the sword arm has moved.
         bool moved = false;
         for (int d = 0; d < Dofs.Length; d++)
@@ -1130,7 +1130,7 @@ public partial class JointLab : Node3D
             if (finger.Thumb)
                 continue;
             // Pressed onto the grip: the finger's flesh gives a little.
-            float wanted = GripRadius * FighterPose.SwordScale + finger.Radius * 0.6f;
+            float wanted = GripRadius * SwordScale + finger.Radius * 0.6f;
             Transform3D parent = hand;
             float wrap = 0; // which way round the grip this finger goes, from its first bone
             for (int i = 0; i < 3; i++)
@@ -1250,7 +1250,7 @@ public partial class JointLab : Node3D
         Vector3 offset = middle - axisPoint;
         Vector3 outward = (offset - axis * offset.Dot(axis)).Normalized();
         Vector3 target = middle + outward * thumb.Radius * 1.6f;
-        float clearance = GripRadius * FighterPose.SwordScale + thumb.Radius * 0.75f;
+        float clearance = GripRadius * SwordScale + thumb.Radius * 0.75f;
         float Inside()
         {
             float inside = 0;
@@ -1585,12 +1585,6 @@ public partial class JointLab : Node3D
         s.ValueChanged += v => { label.Text = $"{v:0}°"; changed((float)v); };
         list.AddChild(s);
         (slider, shown) = (s, label);
-    }
-
-    public override void _UnhandledInput(InputEvent input)
-    {
-        if (input is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.Escape or Key.F2 })
-            GetTree().ChangeSceneToFile("res://scenes/fight_arena.tscn");
     }
 
     /// <summary>For tests and screenshots: set one angle (clamped to the model's range).</summary>

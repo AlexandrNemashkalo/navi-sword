@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="navi-sword"
-run/main_scene="res://scenes/fight_arena.tscn"
+run/main_scene="res://scenes/joint_lab.tscn"
 config/features=PackedStringArray("4.7", "C#", "Forward Plus")
 config/icon="res://icon.svg"
 

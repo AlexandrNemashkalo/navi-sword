@@ -1,0 +1,152 @@
+[gd_scene format=3]
+
+[sub_resource type="StandardMaterial3D" id="Brass"]
+albedo_color = Color(0.72, 0.5, 0.2, 1)
+metallic = 0.75
+roughness = 0.3
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_63"]
+material = SubResource("Brass")
+top_radius = 0.032
+bottom_radius = 0.032
+height = 0.024
+radial_segments = 24
+rings = 1
+
+[sub_resource type="SphereMesh" id="SphereMesh_27"]
+material = SubResource("Brass")
+radius = 1.0
+height = 2.0
+radial_segments = 24
+rings = 12
+
+[sub_resource type="StandardMaterial3D" id="GripLeather"]
+albedo_color = Color(0.2, 0.11, 0.07, 1)
+roughness = 0.85
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_64"]
+material = SubResource("GripLeather")
+top_radius = 0.018
+bottom_radius = 0.021
+height = 0.2
+radial_segments = 12
+rings = 1
+
+[sub_resource type="StandardMaterial3D" id="DarkLeather"]
+albedo_color = Color(0.12, 0.08, 0.06, 1)
+roughness = 0.75
+
+[sub_resource type="TorusMesh" id="TorusMesh_65"]
+material = SubResource("DarkLeather")
+inner_radius = 0.0167
+outer_radius = 0.0223
+rings = 28
+ring_segments = 8
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_66"]
+material = SubResource("Brass")
+top_radius = 0.024
+bottom_radius = 0.022
+height = 0.014
+radial_segments = 20
+rings = 1
+
+[sub_resource type="BoxMesh" id="BoxMesh_67"]
+material = SubResource("Brass")
+size = Vector3(0.05, 0.036, 0.034)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_68"]
+material = SubResource("Brass")
+top_radius = 0.013
+bottom_radius = 0.013
+height = 0.27
+radial_segments = 12
+rings = 1
+
+[sub_resource type="StandardMaterial3D" id="BladeSteel"]
+albedo_color = Color(0.74, 0.82, 0.88, 1)
+metallic = 0.85
+roughness = 0.2
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_69"]
+material = SubResource("BladeSteel")
+top_radius = 0.028
+bottom_radius = 0.037
+height = 0.98
+radial_segments = 4
+rings = 1
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_70"]
+material = SubResource("BladeSteel")
+top_radius = 0.0
+bottom_radius = 0.028
+height = 0.13
+radial_segments = 4
+rings = 1
+
+[sub_resource type="StandardMaterial3D" id="BladeFuller"]
+albedo_color = Color(0.45, 0.52, 0.58, 1)
+metallic = 0.85
+roughness = 0.3
+
+[sub_resource type="BoxMesh" id="BoxMesh_71"]
+material = SubResource("BladeFuller")
+size = Vector3(0.009, 0.62, 0.0016)
+
+[node name="Sword" type="Node3D" unique_id=770071064]
+
+[node name="Pommel" type="MeshInstance3D" parent="." unique_id=1848758738]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, -0.05, 0)
+mesh = SubResource("CylinderMesh_63")
+
+[node name="PommelPeen" type="MeshInstance3D" parent="." unique_id=950792108]
+transform = Transform3D(0.015, 0, 0, 0, 0.015, 0, 0, 0, 0.019, 0, -0.05, 0)
+mesh = SubResource("SphereMesh_27")
+
+[node name="Grip" type="MeshInstance3D" parent="." unique_id=2074174932]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.065, 0)
+mesh = SubResource("CylinderMesh_64")
+
+[node name="GripWrap0" type="MeshInstance3D" parent="." unique_id=1656186195]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.124, 0)
+mesh = SubResource("TorusMesh_65")
+
+[node name="GripWrap1" type="MeshInstance3D" parent="." unique_id=1448401771]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.143, 0)
+mesh = SubResource("TorusMesh_65")
+
+[node name="Ferrule" type="MeshInstance3D" parent="." unique_id=1197585775]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.168, 0)
+mesh = SubResource("CylinderMesh_66")
+
+[node name="GuardBlock" type="MeshInstance3D" parent="." unique_id=1511746442]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.186, 0)
+mesh = SubResource("BoxMesh_67")
+
+[node name="Crossguard" type="MeshInstance3D" parent="." unique_id=423972043]
+transform = Transform3D(0, -1, 0, 1, 0, 0, 0, 0, 1, 0, 0.186, 0)
+mesh = SubResource("CylinderMesh_68")
+
+[node name="QuillonL" type="MeshInstance3D" parent="." unique_id=226945877]
+transform = Transform3D(0.02, 0, 0, 0, 0.02, 0, 0, 0, 0.02, -0.138, 0.192, 0)
+mesh = SubResource("SphereMesh_27")
+
+[node name="QuillonR" type="MeshInstance3D" parent="." unique_id=97527405]
+transform = Transform3D(0.02, 0, 0, 0, 0.02, 0, 0, 0, 0.02, 0.138, 0.192, 0)
+mesh = SubResource("SphereMesh_27")
+
+[node name="Blade" type="MeshInstance3D" parent="." unique_id=745361422]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 0.2, 0, 0.69, 0)
+mesh = SubResource("CylinderMesh_69")
+
+[node name="Tip" type="MeshInstance3D" parent="." unique_id=1115720575]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 0.2, 0, 1.245, 0)
+mesh = SubResource("CylinderMesh_70")
+
+[node name="FullerFront" type="MeshInstance3D" parent="." unique_id=412092324]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.52, -0.0062)
+mesh = SubResource("BoxMesh_71")
+
+[node name="FullerBack" type="MeshInstance3D" parent="." unique_id=1142321187]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.52, 0.0062)
+mesh = SubResource("BoxMesh_71")
