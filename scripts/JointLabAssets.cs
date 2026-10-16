@@ -35,7 +35,7 @@ public partial class JointLab
     /// <summary>The mannequin dissolves round the sword where it would hide it (on by default).</summary>
     [Export] public bool SeeThrough { get; set; } = true;
     /// <summary>The share of the body's pixels still drawn in the middle of the window round the sword.</summary>
-    [Export(PropertyHint.Range, "0,1,0.05")] public float SeeThroughKeep { get; set; } = 0.25f;
+    [Export(PropertyHint.Range, "0,1,0.05")] public float SeeThroughKeep { get; set; } = 0.6f;
     /// <summary>The window's half-width round the sword, as a share of the screen's height.</summary>
     [Export(PropertyHint.Range, "0.02,0.3,0.01")] public float SeeThroughWidth { get; set; } = 0.07f;
     private List<MeshInstance3D> _bodyMeshes = new();
