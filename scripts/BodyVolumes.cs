@@ -113,8 +113,12 @@ public sealed class BodyVolumes
     }
 
     /// <summary>How deep a ball of radius r at p sits inside the body (0 when clear), metres.</summary>
-    public float Depth(Vector3 p, float r)
+    public float Depth(Vector3 p, float r) => Depth(p, r, out _);
+
+    /// <summary>The same, and which bone's volume it is deepest in (-1 when clear).</summary>
+    public float Depth(Vector3 p, float r, out int bone)
     {
+        bone = -1;
         float deepest = 0;
         foreach (var shape in Shapes)
         {
@@ -127,7 +131,11 @@ public sealed class BodyVolumes
             float radial = u.Length();
             // Distance outside the surface, measured along the ray from the centre.
             float outside = s < 1e-5f ? -shape.Semi[(int)shape.Semi.MinAxisIndex()] : radial * (1 - 1 / s);
-            deepest = Mathf.Max(deepest, r - outside);
+            if (r - outside > deepest)
+            {
+                deepest = r - outside;
+                bone = shape.Bone;
+            }
         }
         return deepest;
     }

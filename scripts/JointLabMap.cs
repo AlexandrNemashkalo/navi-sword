@@ -48,6 +48,8 @@ public partial class JointLab
     private readonly int[] _pathCount = new int[6];
     public string SolverStats => $"still {_pathCount[0]}, straight {_pathCount[1]}, hold {_pathCount[2]}, stop at contact {_pathCount[3]}, slide {_pathCount[4]}, full solve {_pathCount[5]}";
     public bool UseCheapSlide { get; set; } = true;
+    /// <summary>For tests: slide with a normal for each contact (JointLabSlide.cs) instead of one for them all.</summary>
+    public bool UseContactSlide { get; set; } = true;
 
     /// <summary>
     /// Where each arm starts and goes back to on reset. The free arm is held behind the back,
@@ -163,6 +165,58 @@ public partial class JointLab
         float overhead = Mathf.SmoothStep(0, 1, Mathf.Clamp((aim[1] - 115) / 40, 0, 1));
         float bent = Mathf.SmoothStep(0, 1, Mathf.Clamp((aim[3] - 35) / 45, 0, 1));
         aim[4] = Mathf.Lerp(aim[4], Mathf.Clamp(aim[4], -60, 60), overhead * bent);
+        EaseLoad(aim);
+    }
+
+    /// <summary>How fast what the anatomy and comfort change of the goal may change, degrees per second.</summary>
+    private const float EaseSpeed = 90;
+    private readonly float[] _plainAim = new float[7];
+
+    /// <summary>
+    /// The aim moves no faster than the goal does, and EaseSpeed more: what the aim makes of the
+    /// goal — the anatomy's limits, the easing for comfort — changes no faster than EaseSpeed,
+    /// and the player's own motion is not slowed (nor trailed: it is the aim that is held back,
+    /// not a correction that would then linger on it). Both are functions of
+    /// the goal, but with steep or stepped parts: the load's scores step, and behind the back
+    /// the highest the arm can rise falls 65° in 35° of plane, so a pad swung back with the arm
+    /// overhead dropped it 60° in eight frames, and at a step of the load the arm turned over
+    /// in four. While the elevation comes down at that speed, the plane is held where that
+    /// elevation still allows (the arm goes back as it comes down), so the limit still holds.
+    /// </summary>
+    private void EaseCorrection(Arm arm, float[] aim, float dt)
+    {
+        var plain = _plainAim;
+        System.Array.Copy(arm.Goal, plain, Dofs.Length);
+        plain[0] = FromChest(0, plain[0]);
+        float most = EaseSpeed * Mathf.Min(dt, 1f / 30);
+        if (arm.EasedKnown)
+            for (int d = 0; d < Dofs.Length; d++)
+            {
+                // As fast as the goal itself moves, and EaseSpeed more.
+                float speed = Mathf.Abs(plain[d] - arm.PlainBefore[d]) + most;
+                aim[d] = arm.Eased[d] + Mathf.Clamp(aim[d] - arm.Eased[d], -speed, speed);
+            }
+        var (lowest, highest) = PlaneFor(aim[1]);
+        if (lowest <= highest)
+            aim[0] = Mathf.Clamp(aim[0], lowest, highest);
+        Anatomy(aim);
+        System.Array.Copy(aim, arm.Eased, Dofs.Length);
+        System.Array.Copy(plain, arm.PlainBefore, Dofs.Length);
+        arm.EasedKnown = true;
+    }
+
+    /// <summary>
+    /// The planes of elevation (from the chest) where the arm can rise this high, where the limit
+    /// is steep: behind the back and far across. The inverse of Anatomy's highest elevation there.
+    /// </summary>
+    private static (float Lowest, float Highest) PlaneFor(float elevation)
+    {
+        float lowest = elevation <= 55 ? Dofs[0].Min
+            : elevation <= 90 ? -45 - 45 * (90 - elevation) / 35
+            : elevation <= 155 ? -10 - 35 * (155 - elevation) / 65
+            : -10; // overhead the limit is gentle (155–165° by plane): the elevation gives, as before
+        float highest = elevation <= 15 ? Dofs[0].Max : 100 + (165 - elevation) / 1.5f;
+        return (Mathf.Max(lowest, Dofs[0].Min), Mathf.Min(highest, Dofs[0].Max));
     }
 
     private float[] CellAim(int cell)
@@ -509,6 +563,39 @@ public partial class JointLab
 
     /// <summary>For tests: an arm's target, goal, aim and angles.</summary>
     public string ArmTrace(int arm) => $"target [{string.Join(" ", System.Array.ConvertAll(_arms[arm].Target, x => x.ToString("0")))}] goal [{string.Join(" ", System.Array.ConvertAll(_arms[arm].Goal, x => x.ToString("0")))}] aim [{string.Join(" ", System.Array.ConvertAll(_arms[arm].Aim, x => x.ToString("0")))}] angles [{string.Join(" ", System.Array.ConvertAll(_arms[arm].Angles, x => x.ToString("0")))}] planning {PlanningPose} route {FollowingPosePath} blocked {PosePathBlocked}";
+
+    /// <summary>For tests: what of the sword arm and sword is within the contact shell, and of which bone.</summary>
+    public string Contacts()
+    {
+        var arm = _arms[0];
+        ArmPose p = Pose(arm, arm.Angles);
+        var found = new List<string>();
+        void Check(string what, Vector3 at, float r, BodyVolumes volumes)
+        {
+            float depth = volumes.Depth(_turn * at, r + Contact, out int bone);
+            if (bone >= 0) found.Add($"{what}>{_skeleton.GetBoneName(bone)} {1000 * (depth - Contact):0}");
+        }
+        foreach (float t in new[] { 0.5f, 0.65f, 0.8f, 1f }) Check($"upper{t:0.00}", p.Shoulder.Lerp(p.Elbow, t), arm.UpperRadius, _body);
+        foreach (float t in new[] { 0.25f, 0.5f, 0.75f, 1f }) Check($"fore{t:0.00}", p.Elbow.Lerp(p.Wrist, t), arm.ForeRadius, _body);
+        Check("knuckle", p.Knuckle, arm.HandRadius, _body);
+        Check("tip", p.Tip, arm.HandRadius * 0.7f, _body);
+        Transform3D sword = SwordFrame(p);
+        for (int i = 0; i <= 11; i += 1)
+        {
+            Vector3 at = SwordPoint(sword, Mathf.Lerp(BladeFrom, BladeTo, i / 11f));
+            Check($"blade{i}", at, BladeRadius, _body);
+            Check($"blade{i}", at, BladeRadius, _legs);
+        }
+        Check("pommel", SwordPoint(sword, PommelFrom), PommelRadius, _body);
+        var (ga, gb) = Guard(sword);
+        Check("guardA", ga, GuardRadius, _body);
+        Check("guardB", gb, GuardRadius, _body);
+        float own = SwordInArms(p, Pose(_arms[1], _arms[1].Angles), Contact);
+        if (own > 0) found.Add($"swordInArm {1000 * own:0}");
+        float pain = Pain(arm.Angles);
+        if (pain > 0) found.Add($"pain {pain:0.0}");
+        return string.Join(", ", found);
+    }
 
     /// <summary>For tests: goal and aim of a sword-arm joint, and how the solver went.</summary>
     public string Trace(int dof) => $"goal {_arms[0].Goal[dof]:0.00} aim {_arms[0].Aim[dof]:0.00} angle {_arms[0].Angles[dof]:0.00} settled {_settled} live {_liveFor:0.00} path {_settlePath}";

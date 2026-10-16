@@ -43,6 +43,9 @@ public partial class JointLab : Node3D
         public readonly float[] Touched = new float[Dofs.Length]; // seconds since the slider moved
         public readonly float[] Goal = new float[Dofs.Length];    // the slider value, reached at Speed
         public float[] Aim = new float[Dofs.Length];              // the goal, inside the anatomy
+        public readonly float[] Eased = new float[Dofs.Length];   // the aim last frame, as EaseCorrection let it move
+        public readonly float[] PlainBefore = new float[Dofs.Length];
+        public bool EasedKnown;
         public readonly HSlider[] Sliders = new HSlider[Dofs.Length];
         public readonly Label[] Values = new Label[Dofs.Length];
     }
@@ -375,9 +378,9 @@ public partial class JointLab : Node3D
     private float Overlap(float[] right, float[] left, float margin = 0)
     {
         ArmPose r = Pose(_arms[0], right), l = Pose(_arms[1], left);
-        float sword = Depth(_arms[0], r, margin) + PainToMetres * Pain(right) + SwordInBody(r, margin) + SwordInArms(r, l, margin);
+        float sword = Depth(_arms[0], r, margin) + PainToMetres * ZonePain(right) + SwordInBody(r, margin) + SwordInArms(r, l, margin);
         return LeftArmPassive ? sword
-            : sword + Depth(_arms[1], l, margin) + Between(r, l, margin) + PainToMetres * Pain(left);
+            : sword + Depth(_arms[1], l, margin) + Between(r, l, margin) + PainToMetres * ZonePain(left);
     }
 
     /// <summary>The sword's frame in skeleton space (unscaled; its local Y up the blade) for the right arm's pose.</summary>
@@ -527,15 +530,74 @@ public partial class JointLab : Node3D
     /// arc; Neer and Hawkins-Kennedy impingement tests), and the raised arm pulled far across
     /// the chest (cross-body adduction test). The solver keeps out of them like out of the body.
     /// </summary>
-    private static float Pain(float[] a)
+    private static float Pain(float[] a) => ZonePain(a) + Overload(a);
+
+    /// <summary>
+    /// The painful zones proper (and the overhead grip), which the arm keeps out of like out of
+    /// the body.
+    /// </summary>
+    private static float ZonePain(float[] a)
     {
         float elevation = a[1], plane = a[0], twist = a[2];
         float raised = Mathf.Clamp((elevation - 50) / 20, 0, 1) * Mathf.Clamp((130 - elevation) / 20, 0, 1);
         const float tolerated = 40; // twisted in this far past comfortable, the raised arm hurts
-        // A pose whose joints together load the arm too much counts as painful too (2° per point).
-        return raised * (Mathf.Max(0, twist - tolerated) + Mathf.Max(0, plane - 110))
-            + 2 * Mathf.Max(0, Load(a) - ComfortLimit)
-            + OverheadGripStrain(a);
+        return raised * (Mathf.Max(0, twist - tolerated) + Mathf.Max(0, plane - 110)) + OverheadGripStrain(a);
+    }
+
+    /// <summary>
+    /// A pose whose joints together load the arm too much counts as painful too (2° per point).
+    /// Not an obstacle: the load is a sum of stepped scores, flat but for its ramps, and at its
+    /// limit the arm stood still with nowhere it could see to go. It is known from the angles
+    /// alone, so the aim is moved under it beforehand (EaseLoad) and the arm goes there freely.
+    /// </summary>
+    private static float Overload(float[] a) => 2 * Mathf.Max(0, Load(a) - ComfortLimit);
+
+    /// <summary>
+    /// How readily each joint gives way to the load limit: the elevation and the elbow most (the
+    /// high guard comes a little lower, the hand a little off the back of the head), the twist
+    /// and the wrist less. Not the plane: where the arm points round the body is the player's,
+    /// and overhead, where going out to the side loads the shoulder less, giving it way swung
+    /// the arm 30° round at a step of the score. Nor the forearm, which the scheme does not score.
+    /// </summary>
+    private static readonly float[] LoadGive = { 0, 1, 0.5f, 1, 0, 0.5f, 0.5f };
+
+    /// <summary>
+    /// Moves an aim under the load limit by the least weighted change, the same way every frame
+    /// for the same aim (so a target held over the limit gives a fixed pose under it, and a
+    /// target moving over it a pose moving smoothly along it). The scores step flat between
+    /// ramps, so where one joint's ramp is flat it is gone past and the next joint takes it.
+    /// </summary>
+    private static void EaseLoad(float[] a)
+    {
+        const float h = 1;
+        Span<float> g = stackalloc float[7];
+        for (int iteration = 0; iteration < 12; iteration++)
+        {
+            float over = Load(a) - ComfortLimit;
+            if (over <= 0)
+                return;
+            float norm = 0;
+            for (int d = 0; d < 7; d++)
+            {
+                g[d] = 0;
+                if (LoadGive[d] == 0) continue;
+                float keep = a[d];
+                a[d] = Mathf.Clamp(keep + h, Dofs[d].Min, Dofs[d].Max);
+                float up = Load(a);
+                a[d] = Mathf.Clamp(keep - h, Dofs[d].Min, Dofs[d].Max);
+                float down = Load(a);
+                a[d] = keep;
+                g[d] = (up - down) / (2 * h);
+                norm += g[d] * g[d] * LoadGive[d];
+            }
+            if (norm < 1e-6f)
+                return;
+            // A little past the limit, so the eased aim is not on the ramp's very edge.
+            float step = (over + 0.05f) / norm;
+            for (int d = 0; d < 7; d++)
+                a[d] = Mathf.Clamp(a[d] - step * g[d] * LoadGive[d], Dofs[d].Min, Dofs[d].Max);
+            Anatomy(a);
+        }
     }
 
     // Gameplay comfort preference, separate from the published joint ranges and
@@ -636,6 +698,9 @@ public partial class JointLab : Node3D
         _solveGradient = new float[Solved.Length], _solveDelta = new float[Solved.Length],
         _solveStart = new float[Solved.Length], _solveB = new float[Solved.Length];
     private int _quietSolveFrames;
+    /// <summary>Live: how fast a joint may gather speed, degrees per second squared (to 450°/s in a tenth of a second).</summary>
+    private const float Accelerate = 4500;
+    private readonly float[] _lastStep = new float[Solved.Length], _solveReach = new float[Solved.Length];
     public bool PoseSettled => _settled && !_footwork.Moving && !PlanningPose && !FollowingPosePath;
 
     /// <summary>Gradient of the overlap over the solved joints.</summary>
@@ -644,18 +709,18 @@ public partial class JointLab : Node3D
         const float h = 0.5f;
         // Moving one arm leaves the other's pose and its overlap with the body as they are.
         ArmPose fixedRight = Pose(_arms[0], right), fixedLeft = Pose(_arms[1], left);
-        float rightAlone = Depth(_arms[0], fixedRight, margin) + PainToMetres * Pain(right) + SwordInBody(fixedRight, margin);
-        float leftAlone = LeftArmPassive ? 0 : Depth(_arms[1], fixedLeft, margin) + PainToMetres * Pain(left);
+        float rightAlone = Depth(_arms[0], fixedRight, margin) + PainToMetres * ZonePain(right) + SwordInBody(fixedRight, margin);
+        float leftAlone = LeftArmPassive ? 0 : Depth(_arms[1], fixedLeft, margin) + PainToMetres * ZonePain(left);
         float With(int g)
         {
             if (Solved[g].Arm == 0)
             {
                 var r = Pose(_arms[0], right);
-                return Depth(_arms[0], r, margin) + PainToMetres * Pain(right) + SwordInBody(r, margin)
+                return Depth(_arms[0], r, margin) + PainToMetres * ZonePain(right) + SwordInBody(r, margin)
                     + leftAlone + (LeftArmPassive ? 0 : Between(r, fixedLeft, margin)) + SwordInArms(r, fixedLeft, margin);
             }
             var l = Pose(_arms[1], left);
-            return rightAlone + Depth(_arms[1], l, margin) + PainToMetres * Pain(left)
+            return rightAlone + Depth(_arms[1], l, margin) + PainToMetres * ZonePain(left)
                 + Between(fixedRight, l, margin) + SwordInArms(fixedRight, l, margin);
         }
         for (int g = 0; g < Solved.Length; g++)
@@ -722,6 +787,8 @@ public partial class JointLab : Node3D
             // turned chest. Aim at the nearest pose the anatomy allows.
             var aim = arm.Aim;
             AimFor(k, arm.Goal, aim);
+            if (k == 0)
+                EaseCorrection(arm, aim, dt * (planning ? 4 : 1));
             // Where the sword arm would run into something it aims at where the contact map says it can go.
             if (k == 0)
                 ApplyContactMap(arm.Goal, aim);
@@ -747,10 +814,17 @@ public partial class JointLab : Node3D
         var frameStart = _solveFrame;
         for (int g = 0; g < n; g++)
             frameStart[g] = Angles(g)[Solved[g].Dof];
+        // Live, a joint gathers speed over a tenth of a second instead of at once: an arm held
+        // back a frame (by a contact, a limit) and then let go caught up in one 7.5° jump. It
+        // may slow at once, so it never runs on into what stopped it.
+        var reachOf = _solveReach;
+        float gather = live && !planning ? Accelerate * dt * dt : float.PositiveInfinity;
+        for (int g = 0; g < n; g++)
+            reachOf[g] = Mathf.Min(reach, Mathf.Abs(_lastStep[g]) + gather);
         float Limit(int g, float value)
         {
             int d = Solved[g].Dof;
-            return Mathf.Clamp(Mathf.Clamp(value, frameStart[g] - reach, frameStart[g] + reach), Dofs[d].Min, Dofs[d].Max);
+            return Mathf.Clamp(Mathf.Clamp(value, frameStart[g] - reachOf[g], frameStart[g] + reachOf[g]), Dofs[d].Min, Dofs[d].Max);
         }
         void Set(int g, float value) => Angles(g)[Solved[g].Dof] = value;
         float Get(int g) => Angles(g)[Solved[g].Dof];
@@ -788,11 +862,13 @@ public partial class JointLab : Node3D
             // were pushed out again every frame: the hand flapped.
             var aimNow = _solveAimNow;
             float drift = ReturnSpeed * dt;
-            // Slowly only while something is near (within the contact shell): pulled clear, they
-            // come back at once — slow, they kept the arm as if stuck to the body after it left.
-            bool near = live && UseSlowReturn && Overlap(right, left, Contact) > 0;
+            // As slowly clear of everything as near it: the slide turns the hand and forearm well
+            // away from their aim, and snapped back whenever the arm came a hair clear, then held
+            // again as it touched, they jerked to and fro along the body. (They still let go of
+            // the body at once: the driven joints lead, and these follow at ReturnSpeed.)
+            bool slow = live && UseSlowReturn;
             for (int g = 0; g < n; g++)
-                aimNow[g] = near && weight[g] < Driven ? Get(g) + Mathf.Clamp(Aim(g) - Get(g), -drift, drift) : Aim(g);
+                aimNow[g] = slow && weight[g] < Driven ? Get(g) + Mathf.Clamp(Aim(g) - Get(g), -drift, drift) : Aim(g);
             // A contact already there (a hand resting on the hip, a hair's breadth) is no reason
             // to stop: the step is taken if it does not press in any further — no deeper than
             // before, or than the solver's own tolerance, never a little more each frame.
@@ -833,8 +909,21 @@ public partial class JointLab : Node3D
                     }
                     for (int g = 0; g < n; g++) Set(g, Mathf.Lerp(straight[g], full[g], lo));
                     Allowed();
-                    clear = lo > StopAtContactMin && Overlap(right, left) <= allowed;
-                    if (!clear && UseCheapSlide)
+                    clear = Overlap(right, left) <= allowed;
+                    if (clear && lo < 0.99f && UseCheapSlide && UseContactSlide)
+                    {
+                        // From the contact, the rest of the step along everything it touches:
+                        // the way to the contact is kept, not thrown away and started again.
+                        path = 4;
+                        Slide(full, weight, allowed, right, left, Limit, Allowed);
+                        // Already inside (the trunk turning into the blade), the slide pushes the
+                        // points out too; the full solver is needed only if it gets nowhere.
+                        float after = Overlap(right, left);
+                        clear = after <= Mathf.Max(allowed, SlideTolerance) && (already <= Penetrating || after <= Mathf.Max(Penetrating, 0.5f * already));
+                    }
+                    else if (clear && lo <= StopAtContactMin)
+                        clear = false;
+                    if (!clear && UseCheapSlide && !UseContactSlide)
                     {
                         // Up against it: slide. Which way the obstacle's surface faces is read
                         // once (the overlap's gradient within a thin shell round it); the part of
@@ -875,7 +964,7 @@ public partial class JointLab : Node3D
             {
                 _settled = true;
                 for (int g = 0; g < n; g++)
-                    if (Mathf.Abs(Get(g) - Aim(g)) > 0.01f) _settled = false;
+                    if (Mathf.Abs(Get(g) - aimNow[g]) > 0.01f) _settled = false;
                 _settlePath = path switch { 1 => "straight", 2 => "hold", 3 => "stop at contact", _ => "slide" };
                 _pathCount[path]++;
                 goto Solved;
@@ -993,6 +1082,7 @@ public partial class JointLab : Node3D
             }
         }
     Solved:
+        for (int g = 0; g < n; g++) _lastStep[g] = Get(g) - frameStart[g];
         float travel = 0;
         for (int g = 0; g < n; g++) travel = Mathf.Max(travel, Mathf.Abs(Get(g) - frameStart[g]));
         // Sub-degree numerical corrections at an unreachable target are not a
