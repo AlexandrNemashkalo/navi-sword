@@ -1188,6 +1188,7 @@ public partial class JointLab : Node3D
         Gamepad(Mathf.Min((float)delta, 0.05f));
         Tire((float)delta);
         Rumble((float)delta);
+        UpdateTrigger((float)delta);
         BuildContactMap(3);
         // Run independently of Settle's early exit: a foot must finish its step
         // even after the arm sliders have already reached their goals.

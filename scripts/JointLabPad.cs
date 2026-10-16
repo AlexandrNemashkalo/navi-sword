@@ -107,6 +107,7 @@ public partial class JointLab
         _rumbleLabel = Line(1);
         BuildStaminaPanel(list);
         BuildSoundPanel(list);
+        BuildTriggerPanel(list);
         _mapLabel = Line(1);
         list.AddChild(new HSeparator());
         return list;
