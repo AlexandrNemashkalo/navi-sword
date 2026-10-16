@@ -37,7 +37,7 @@ public partial class JointLab
     /// <summary>The share of the body's pixels still drawn in the middle of the window round the sword.</summary>
     [Export(PropertyHint.Range, "0,1,0.05")] public float SeeThroughKeep { get; set; } = 0.25f;
     /// <summary>The window's half-width round the sword, as a share of the screen's height.</summary>
-    [Export(PropertyHint.Range, "0.02,0.3,0.01")] public float SeeThroughWidth { get; set; } = 0.09f;
+    [Export(PropertyHint.Range, "0.02,0.3,0.01")] public float SeeThroughWidth { get; set; } = 0.03f;
     private List<MeshInstance3D> _bodyMeshes = new();
     private readonly List<ShaderMaterial> _dithered = new();
 
@@ -75,7 +75,7 @@ void fragment() {
         float t = clamp(dot(FRAGCOORD.xy - from, ab) / max(dot(ab, ab), 1.0), 0.0, 1.0);
         float d = length(FRAGCOORD.xy - (from + ab * t));
         float w = width * VIEWPORT_SIZE.y;
-        float drawn = mix(keep, 1.0, smoothstep(w, w * 1.8, d));
+        float drawn = mix(keep, 1.0, smoothstep(w, w * 1.4, d));
         // Only what is well in front of the sword hides it: the fist round the grip and the
         // forearm by it, nearer by less than a fist, stay solid.
         float sword_depth = mix(from_depth, to_depth, t);
