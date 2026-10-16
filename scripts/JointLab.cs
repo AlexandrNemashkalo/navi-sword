@@ -378,9 +378,9 @@ public partial class JointLab : Node3D
     private float Overlap(float[] right, float[] left, float margin = 0)
     {
         ArmPose r = Pose(_arms[0], right), l = Pose(_arms[1], left);
-        float sword = Depth(_arms[0], r, margin) + PainToMetres * ZonePain(right) + SwordInBody(r, margin) + SwordInArms(r, l, margin);
+        float sword = Depth(_arms[0], r, margin) + SwordInBody(r, margin) + SwordInArms(r, l, margin);
         return LeftArmPassive ? sword
-            : sword + Depth(_arms[1], l, margin) + Between(r, l, margin) + PainToMetres * ZonePain(left);
+            : sword + Depth(_arms[1], l, margin) + Between(r, l, margin);
     }
 
     /// <summary>The sword's frame in skeleton space (unscaled; its local Y up the blade) for the right arm's pose.</summary>
@@ -527,75 +527,103 @@ public partial class JointLab : Node3D
 
     /// <summary>
     /// Painful zones, degrees into them: the arm raised 60–120° and twisted in (the painful
-    /// arc; Neer and Hawkins-Kennedy impingement tests), and the raised arm pulled far across
-    /// the chest (cross-body adduction test). The solver keeps out of them like out of the body.
+    /// arc; Neer and Hawkins-Kennedy impingement tests), the raised arm pulled far across the
+    /// chest (cross-body adduction test), the grip strained overhead, and a pose whose joints
+    /// together load the arm too much (2° per point).
+    ///
+    /// None of them is an obstacle. They are known from the angles alone, and each had a
+    /// boundary the arm stood still on: at the edge of the painful arc the twist cannot go on
+    /// and the elevation, there, does not change the pain at all, so the slide could only stop;
+    /// the load is a sum of stepped scores, flat but for its ramps. So the aim is moved out of
+    /// them beforehand (EaseComfort), each by the joints that resolve it — above all not the one
+    /// the player is turning into it — and the arm goes there freely.
     /// </summary>
-    private static float Pain(float[] a) => ZonePain(a) + Overload(a);
+    private static float Pain(float[] a) => Impinged(a) + AcrossChest(a) + OverheadGripStrain(a) + Overload(a);
 
-    /// <summary>
-    /// The painful zones proper (and the overhead grip), which the arm keeps out of like out of
-    /// the body.
-    /// </summary>
-    private static float ZonePain(float[] a)
-    {
-        float elevation = a[1], plane = a[0], twist = a[2];
-        float raised = Mathf.Clamp((elevation - 50) / 20, 0, 1) * Mathf.Clamp((130 - elevation) / 20, 0, 1);
-        const float tolerated = 40; // twisted in this far past comfortable, the raised arm hurts
-        return raised * (Mathf.Max(0, twist - tolerated) + Mathf.Max(0, plane - 110)) + OverheadGripStrain(a);
-    }
+    /// <summary>How far the raised arm sits in the painful arc of elevation (0 below 50° and above 130°, 1 from 70° to 110°).</summary>
+    private static float Raised(float[] a) => Mathf.Clamp((a[1] - 50) / 20, 0, 1) * Mathf.Clamp((130 - a[1]) / 20, 0, 1);
 
-    /// <summary>
-    /// A pose whose joints together load the arm too much counts as painful too (2° per point).
-    /// Not an obstacle: the load is a sum of stepped scores, flat but for its ramps, and at its
-    /// limit the arm stood still with nowhere it could see to go. It is known from the angles
-    /// alone, so the aim is moved under it beforehand (EaseLoad) and the arm goes there freely.
-    /// </summary>
+    /// <summary>The raised arm twisted in further than this past comfortable hurts (degrees).</summary>
+    private const float ToleratedTwist = 40;
+
+    private static float Impinged(float[] a) => Raised(a) * Mathf.Max(0, a[2] - ToleratedTwist);
+
+    private static float AcrossChest(float[] a) => Raised(a) * Mathf.Max(0, a[0] - 110);
+
     private static float Overload(float[] a) => 2 * Mathf.Max(0, Load(a) - ComfortLimit);
 
     /// <summary>
-    /// How readily each joint gives way to the load limit: the elevation and the elbow most (the
-    /// high guard comes a little lower, the hand a little off the back of the head), the twist
-    /// and the wrist less. Not the plane: where the arm points round the body is the player's,
-    /// and overhead, where going out to the side loads the shoulder less, giving it way swung
-    /// the arm 30° round at a step of the score. Nor the forearm, which the scheme does not score.
+    /// How readily each joint gives way, per zone (plane, elevation, twist, elbow, forearm,
+    /// wrist ×2). Twisted in under the raised arm, the elevation leaves the arc first (it comes
+    /// down out of it, or up), the plane a little, the twist the player turns least. Across the
+    /// chest, the elevation, then the plane. Over the load limit, the elevation and the elbow
+    /// most (the high guard comes a little lower), the twist and the wrist less, never the plane
+    /// (overhead, giving it way swung the arm 30° round at a step of the score) nor the forearm
+    /// (not scored).
     /// </summary>
-    private static readonly float[] LoadGive = { 0, 1, 0.5f, 1, 0, 0.5f, 0.5f };
+    private static readonly float[] ImpingedGive = { 0.3f, 1, 0.1f, 0, 0, 0, 0 },
+        AcrossGive = { 0.3f, 1, 0, 0, 0, 0, 0 },
+        LoadGive = { 0, 1, 0.5f, 1, 0, 0.5f, 0.5f },
+        TwistGive = { 0, 0, 1, 0, 0, 0, 0 };
+
+    /// <summary>How far the elevation may go to leave the painful arc, degrees (then the twist gives way).</summary>
+    private const float ArcLeave = 8;
+
+    /// <summary>Moves an aim out of the painful zones and under the load limit (see Pain).</summary>
+    private static void EaseComfort(float[] a)
+    {
+        float elevation = a[1];
+        for (int pass = 0; pass < 2; pass++)
+        {
+            // The elevation leaves the arc only where its edge is near: deep in it, carried out
+            // over the top and back, the arm rose and fell 25° between two guards the player
+            // held level. Past ArcLeave the twist makes way for the rest.
+            Ease(a, Impinged, 0, ImpingedGive, 0.5f);
+            if (Mathf.Abs(a[1] - elevation) > ArcLeave)
+            {
+                a[1] = Mathf.Clamp(a[1], elevation - ArcLeave, elevation + ArcLeave);
+                Anatomy(a);
+                Ease(a, Impinged, 0, TwistGive, 0.5f);
+            }
+            Ease(a, AcrossChest, 0, AcrossGive, 0.5f);
+            Ease(a, Load, ComfortLimit, LoadGive, 0.05f);
+        }
+    }
 
     /// <summary>
-    /// Moves an aim under the load limit by the least weighted change, the same way every frame
-    /// for the same aim (so a target held over the limit gives a fixed pose under it, and a
-    /// target moving over it a pose moving smoothly along it). The scores step flat between
-    /// ramps, so where one joint's ramp is flat it is gone past and the next joint takes it.
+    /// Moves an aim to `measure` ≤ `limit` (and `past` beyond it, off the very edge of a ramp)
+    /// by the least change weighted by `give`, the same way every frame for the same aim: a
+    /// target held over the limit gives a fixed pose under it, a target moving over it a pose
+    /// moving along it. Where one joint's ramp is flat, the next joint with a slope takes it.
     /// </summary>
-    private static void EaseLoad(float[] a)
+    private static void Ease(float[] a, Func<float[], float> measure, float limit, float[] give, float past)
     {
         const float h = 1;
         Span<float> g = stackalloc float[7];
         for (int iteration = 0; iteration < 12; iteration++)
         {
-            float over = Load(a) - ComfortLimit;
+            float over = measure(a) - limit;
             if (over <= 0)
                 return;
             float norm = 0;
             for (int d = 0; d < 7; d++)
             {
                 g[d] = 0;
-                if (LoadGive[d] == 0) continue;
+                if (give[d] == 0) continue;
                 float keep = a[d];
                 a[d] = Mathf.Clamp(keep + h, Dofs[d].Min, Dofs[d].Max);
-                float up = Load(a);
+                float up = measure(a);
                 a[d] = Mathf.Clamp(keep - h, Dofs[d].Min, Dofs[d].Max);
-                float down = Load(a);
+                float down = measure(a);
                 a[d] = keep;
                 g[d] = (up - down) / (2 * h);
-                norm += g[d] * g[d] * LoadGive[d];
+                norm += g[d] * g[d] * give[d];
             }
             if (norm < 1e-6f)
                 return;
-            // A little past the limit, so the eased aim is not on the ramp's very edge.
-            float step = (over + 0.05f) / norm;
+            float step = (over + past) / norm;
             for (int d = 0; d < 7; d++)
-                a[d] = Mathf.Clamp(a[d] - step * g[d] * LoadGive[d], Dofs[d].Min, Dofs[d].Max);
+                a[d] = Mathf.Clamp(a[d] - step * g[d] * give[d], Dofs[d].Min, Dofs[d].Max);
             Anatomy(a);
         }
     }
@@ -611,7 +639,7 @@ public partial class JointLab : Node3D
     }
 
     /// <summary>
-    /// Above this postural load (points, see Load) a pose is kept out of like a painful one:
+    /// Above this postural load (points, see Load) the aim is eased off, like out of a painful zone:
     /// the end of the scheme's category II ("fairly safe"); past it the pose is to be changed.
     /// Sword guards score well under it (middle guard 3, thrust 3, high guard about 10).
     /// </summary>
@@ -672,9 +700,6 @@ public partial class JointLab : Node3D
     /// <summary>The scheme's category for a postural load: I to IV.</summary>
     private static string Category(float load) => load <= 5 ? "I" : load <= 12 ? "II" : load <= 25 ? "III" : "IV";
 
-    /// <summary>Pain counts towards the overlap at this rate: 1° into a painful zone as 2 mm into the body.</summary>
-    private const float PainToMetres = 0.002f;
-
     /// <summary>A shell this thick round each obstacle counts as touching it, metres.</summary>
     private const float Contact = 0.006f;
 
@@ -709,18 +734,18 @@ public partial class JointLab : Node3D
         const float h = 0.5f;
         // Moving one arm leaves the other's pose and its overlap with the body as they are.
         ArmPose fixedRight = Pose(_arms[0], right), fixedLeft = Pose(_arms[1], left);
-        float rightAlone = Depth(_arms[0], fixedRight, margin) + PainToMetres * ZonePain(right) + SwordInBody(fixedRight, margin);
-        float leftAlone = LeftArmPassive ? 0 : Depth(_arms[1], fixedLeft, margin) + PainToMetres * ZonePain(left);
+        float rightAlone = Depth(_arms[0], fixedRight, margin) + SwordInBody(fixedRight, margin);
+        float leftAlone = LeftArmPassive ? 0 : Depth(_arms[1], fixedLeft, margin);
         float With(int g)
         {
             if (Solved[g].Arm == 0)
             {
                 var r = Pose(_arms[0], right);
-                return Depth(_arms[0], r, margin) + PainToMetres * ZonePain(right) + SwordInBody(r, margin)
+                return Depth(_arms[0], r, margin) + SwordInBody(r, margin)
                     + leftAlone + (LeftArmPassive ? 0 : Between(r, fixedLeft, margin)) + SwordInArms(r, fixedLeft, margin);
             }
             var l = Pose(_arms[1], left);
-            return rightAlone + Depth(_arms[1], l, margin) + PainToMetres * ZonePain(left)
+            return rightAlone + Depth(_arms[1], l, margin)
                 + Between(fixedRight, l, margin) + SwordInArms(fixedRight, l, margin);
         }
         for (int g = 0; g < Solved.Length; g++)

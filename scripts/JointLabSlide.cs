@@ -4,7 +4,7 @@ using Godot;
 /// <summary>
 /// Sliding along obstacles, every contact point on its own.
 ///
-/// The overlap is a sum over points of the arm and the sword, and the painful zones; its one
+/// The overlap is a sum over points of the arm and the sword; its one
 /// gradient points between the contacts. Sliding along that one normal, the arm stood still
 /// in every corner where two contacts met (lifting the bent arm: the blade by the head, the
 /// guard by the chest), and even one body volume's summed normal pointed between its points,
@@ -17,8 +17,8 @@ using Godot;
 /// </summary>
 public partial class JointLab
 {
-    /// <summary>Constraint rows: 4 upper arm, 4 forearm, knuckle, fingertip, 12 blade, 2 pommel, 5 guard; then the painful zones and the sword in the arms.</summary>
-    private const int PointRows = 29, PainRow = 29, ArmsRow = 30, Rows = 31;
+    /// <summary>Constraint rows: 4 upper arm, 4 forearm, knuckle, fingertip, 12 blade, 2 pommel, 5 guard; then the sword in the arms.</summary>
+    private const int PointRows = 29, ArmsRow = 29, Rows = 30;
     private static readonly float[] UpperSamples = { 0.5f, 0.65f, 0.8f, 1f }, ForeSamples = { 0.25f, 0.5f, 0.75f, 1f };
     private static readonly float[] PommelSamples = { PommelFrom, (PommelFrom + PommelTo) / 2 };
     private readonly float[] _rows = new float[Rows], _rowsNow = new float[Rows], _rowsUp = new float[Rows], _rowsDown = new float[Rows];
@@ -39,7 +39,7 @@ public partial class JointLab
 
     /// <summary>
     /// The overlap row by row: how deep each point's ball (grown by margin) is in the body,
-    /// then the painful zones and the sword in the arms (metres). With margin 0 they add up to
+    /// then the sword in the arms (metres). With margin 0 they add up to
     /// Overlap.
     /// </summary>
     private void OverlapRows(float[] right, float[] left, float margin, float[] rows)
@@ -62,11 +62,10 @@ public partial class JointLab
         foreach (float y in PommelSamples) rows[i++] = Sword(SwordPoint(sword, y), PommelRadius + margin);
         var (guardA, guardB) = Guard(sword);
         for (int k = 0; k <= 4; k++) rows[i++] = Sword(guardA.Lerp(guardB, k / 4f), GuardRadius + margin);
-        rows[PainRow] = PainToMetres * ZonePain(right);
         ArmPose l = Pose(_arms[1], left);
         rows[ArmsRow] = SwordInArms(p, l, margin);
         if (!LeftArmPassive)
-            rows[ArmsRow] += Depth(_arms[1], l, margin) + Between(p, l, margin) + PainToMetres * ZonePain(left);
+            rows[ArmsRow] += Depth(_arms[1], l, margin) + Between(p, l, margin);
     }
 
     /// <summary>Each row's gradient over the solved joints, into _normals.</summary>
@@ -191,7 +190,7 @@ public partial class JointLab
             anatomy();
         }
         // The rows in the contact shell, and how much nearer each may come: a point up to the
-        // obstacle's surface, the pain and the arms no further in.
+        // obstacle's surface, the arms no further in.
         OverlapRows(right, left, Contact, _rows);
         bool anyNear = false;
         for (int k = 0; k < Rows; k++)
@@ -210,7 +209,9 @@ public partial class JointLab
             _slideInverse[g] = 1 / weight[g];
         }
         if (anyNear)
+        {
             Constrain(step, _slideSlack, _slideNear, limit, from, tangent);
+        }
         else
             Array.Copy(step, tangent, n);
         bool Try(float fraction, int passes)

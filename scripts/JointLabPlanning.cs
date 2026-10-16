@@ -70,7 +70,7 @@ public partial class JointLab
             float overhead = Mathf.SmoothStep(0, 1, Mathf.Clamp((angles[1] - 115) / 40, 0, 1));
             float bent = Mathf.SmoothStep(0, 1, Mathf.Clamp((angles[3] - 35) / 45, 0, 1));
             angles[4] = Mathf.Lerp(angles[4], Mathf.Clamp(angles[4], -60, 60), overhead * bent);
-            EaseLoad(angles);
+            EaseComfort(angles);
         }
         float distance = PoseDistance(before, target);
         if (distance > 20) return false;
