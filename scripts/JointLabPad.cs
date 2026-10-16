@@ -35,7 +35,7 @@ public partial class JointLab
     /// <summary>The arm and the pad when L1 went down.</summary>
     private readonly float[] _held = new float[7];
     private Vector3 _padHeld;
-    private Label _padStatus = null!, _padValues = null!, _padHelp = null!;
+    private Label _padStatus = null!, _padValues = null!, _padHelp = null!, _rumbleLabel = null!;
 
     /// <summary>The guard the pad's centre stands for: arm forward and a little up, elbow bent.</summary>
     private const float GuardPlane = 80, GuardElevation = 45, GuardElbow = 70;
@@ -93,6 +93,10 @@ public partial class JointLab
         _padValues = Line(7);
         _padHelp = Line(6);
         _padHelp.Modulate = new Color(1, 1, 1, 0.6f);
+        var rumble = new CheckBox { Text = "Вибрация по нагрузке позы (с категории II)", ButtonPressed = true };
+        rumble.Toggled += on => LoadRumble = on;
+        list.AddChild(rumble);
+        _rumbleLabel = Line(1);
         _mapLabel = Line(1);
         list.AddChild(new HSeparator());
         return list;
@@ -277,6 +281,58 @@ public partial class JointLab
     /// the same attitude, turned as far as the plane those tests meant now takes.
     /// </summary>
     public Vector3 EvenSwing(Vector3 pad) => new(pad.X, SwingTurn(GuardPlane - SwingGain * pad.Y), pad.Z);
+
+    /// <summary>The pad vibrates with the sword arm's postural load (unticked: not at all).</summary>
+    public bool LoadRumble { get; set; } = true;
+    private float _rumbleSent = -1, _rumbleFor;
+
+    /// <summary>
+    /// How hard the pad vibrates for a postural load (LUBA points), 0–1, and how much of that
+    /// is the heavy motor. Category I (up to 5, safe) not at all; through category II (to 12)
+    /// the light motor alone, from barely felt to a third; through III (to 25) up to four
+    /// fifths, the heavy motor coming in; in IV on to full at 35. Smooth all the way: the
+    /// number, not only its category, is felt.
+    /// </summary>
+    private static (float Weak, float Strong) RumbleFor(float load)
+    {
+        float level = load <= 5 ? 0
+            : load <= 12 ? Mathf.Lerp(0.05f, 0.35f, (load - 5) / 7)
+            : load <= 25 ? Mathf.Lerp(0.35f, 0.8f, (load - 12) / 13)
+            : Mathf.Lerp(0.8f, 1, Mathf.Clamp((load - 25) / 10, 0, 1));
+        float heavy = Mathf.Clamp((load - 12) / 13, 0, 1);
+        return (level, level * heavy);
+    }
+
+    /// <summary>For tests (GDScript sees no static methods): RumbleFor as (light, heavy motor).</summary>
+    public Vector2 RumbleAt(float load)
+    {
+        var (weak, strong) = RumbleFor(load);
+        return new Vector2(weak, strong);
+    }
+
+    /// <summary>Keeps the pad vibrating at the sword arm's present load, renewed a few times a second.</summary>
+    private void Rumble(float dt)
+    {
+        float load = Load(_arms[0].Angles);
+        var (weak, strong) = LoadRumble ? RumbleFor(load) : (0f, 0f);
+        _rumbleLabel.Text = LoadRumble ? $"Вибрация по нагрузке: {100 * weak:0}% (тяжёлый мотор {100 * strong:0}%)" : "Вибрация по нагрузке: выключена";
+        if (_device < 0)
+            return;
+        _rumbleFor -= dt;
+        if (weak <= 0)
+        {
+            if (_rumbleSent != 0)
+                Input.StopJoyVibration(_device);
+            _rumbleSent = 0;
+            return;
+        }
+        // Renewed before it runs out, or at once when it has changed noticeably.
+        if (_rumbleFor > 0 && Mathf.Abs(weak - _rumbleSent) < 0.03f)
+            return;
+        Input.StartJoyVibration(_device, weak, strong, 0.25f);
+        _rumbleSent = weak;
+        _rumbleFor = 0.15f;
+    }
 
     /// <summary>For tests: the arm's plane of elevation as the slider measures it (from the front).</summary>
     public float PlaneFromFront(int arm) => FromFront(arm, _arms[arm].Angles[0]);

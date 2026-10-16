@@ -1138,6 +1138,7 @@ public partial class JointLab : Node3D
     public override void _Process(double delta)
     {
         Gamepad(Mathf.Min((float)delta, 0.05f));
+        Rumble((float)delta);
         BuildContactMap(3);
         // Run independently of Settle's early exit: a foot must finish its step
         // even after the arm sliders have already reached their goals.
