@@ -144,7 +144,8 @@ public partial class JointLab
         }
         else if (_r2Down && _r2 < PressedAt * 0.6f)
             _r2Down = false;
-        if (_r2Down && !_snapped && _arms[0].Angles[3] < SnapElbow)
+        // The snap: the cut's elbow come straight, or the thrust driven all the way (L1).
+        if (_r2Down && !_snapped && (_arms[0].Angles[3] < SnapElbow || _fine && _r2 > 0.95f))
         {
             _snapped = true;
             if (SwordSound) Crack(0.9f);

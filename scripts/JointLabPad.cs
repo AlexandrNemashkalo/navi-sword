@@ -266,13 +266,20 @@ public partial class JointLab
         else
         {
             p = pad - _padHeld;
+            // The shoulder stays held (the thrust below moves it from there, not from its last).
+            want[0] = _held[0];
+            want[1] = _held[1];
             want[3] = _held[3] + ForearmGain * p.X;        // nose up lifts the forearm: the elbow bends
             want[2] = _held[2] - ForearmGain * p.Y;        // turned right swings the forearm out
             want[4] = _held[4] - ForearmGain * p.Z;        // rolled right turns the palm up
             want[5] = _held[5] + 45 * stick.Y;             // stick down bends the hand to the palm
             want[6] = _held[6] + 17 * stick.X;             // stick right tilts it to the thumb
         }
-        want[3] = Mathf.Lerp(want[3], 0, straighten);
+        // R2: out of fine work it straightens the elbow (a cut's end); in it, it thrusts.
+        if (fine)
+            Thrust(want, straighten);
+        else
+            want[3] = Mathf.Lerp(want[3], 0, straighten);
         TriggerPulled(straighten);
         _padLive = true;
 

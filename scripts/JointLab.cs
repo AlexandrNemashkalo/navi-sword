@@ -1547,7 +1547,9 @@ public partial class JointLab : Node3D
     /// one from the left turns it round. Hardly at all while the arm hangs (its plane means
     /// little then). The thoracolumbar spine turns some 40–60° each way.
     /// </summary>
-    private float TrunkTwist() => TrunkTwist(_arms[0].Goal);
+    // Thrusting, the trunk holds the turn it had: following the plane the thrust changes, it
+    // turned the shoulders and took the sword off its line.
+    private float TrunkTwist() => float.IsFinite(_thrustTwist) ? _thrustTwist : TrunkTwist(_arms[0].Goal);
 
     private static float TrunkTwist(float[] goal)
     {
