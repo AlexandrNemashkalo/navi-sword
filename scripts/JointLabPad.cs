@@ -97,6 +97,7 @@ public partial class JointLab
         rumble.Toggled += on => LoadRumble = on;
         list.AddChild(rumble);
         _rumbleLabel = Line(1);
+        BuildStaminaPanel(list);
         _mapLabel = Line(1);
         list.AddChild(new HSeparator());
         return list;
@@ -328,7 +329,8 @@ public partial class JointLab
         float load = Load(_arms[0].Angles);
         _heldLoaded = Mathf.Clamp(_heldLoaded + (load > RumbleFrom ? dt : -2 * dt), 0, RumbleHold);
         float held = Mathf.SmoothStep(0, 1, _heldLoaded / RumbleHold);
-        var (weak, strong) = LoadRumble ? RumbleFor(load) : (0f, 0f);
+        // Tired, the same pose is felt more: up to half as many points again, exhausted.
+        var (weak, strong) = LoadRumble ? RumbleFor(load * (1 + 0.5f * Fatigue)) : (0f, 0f);
         weak *= held;
         strong *= held;
         _rumbleLabel.Text = LoadRumble ? $"Вибрация по нагрузке: {100 * weak:0}% (тяжёлый мотор {100 * strong:0}%)" : "Вибрация по нагрузке: выключена";

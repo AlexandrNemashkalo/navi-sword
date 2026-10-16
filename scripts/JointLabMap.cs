@@ -165,7 +165,7 @@ public partial class JointLab
         float overhead = Mathf.SmoothStep(0, 1, Mathf.Clamp((aim[1] - 115) / 40, 0, 1));
         float bent = Mathf.SmoothStep(0, 1, Mathf.Clamp((aim[3] - 35) / 45, 0, 1));
         aim[4] = Mathf.Lerp(aim[4], Mathf.Clamp(aim[4], -60, 60), overhead * bent);
-        EaseComfort(aim);
+        EaseComfort(aim, LoadLimitNow);
     }
 
     /// <summary>How fast what the anatomy and comfort change of the goal may change, degrees per second.</summary>

@@ -3,6 +3,8 @@ func _initialize():call_deferred('run')
 func run():
  var lab=load('res://scenes/joint_lab.tscn').instantiate()
  root.add_child(lab);lab.set_process(false)
+ # The poses are held still on purpose: tiring would move them (joint_stamina_test).
+ lab.UseStamina = false
  var poses=[[45,169,-44,87,89,7,-10],[130,80,80,130,90,45,10],[-95,130,-80,120,-90,-45,-25],[90,30,80,130,90,45,10]]
  for pose in poses:
   for d in range(7):lab.Set(0,d,float(pose[d]))

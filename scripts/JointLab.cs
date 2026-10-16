@@ -578,8 +578,8 @@ public partial class JointLab : Node3D
     /// <summary>How far the elevation may go to leave the painful arc, degrees (then the twist gives way).</summary>
     private const float ArcLeave = 8;
 
-    /// <summary>Moves an aim out of the painful zones and under the load limit (see Pain).</summary>
-    private static void EaseComfort(float[] a)
+    /// <summary>Moves an aim out of the painful zones and under the load limit (see Pain; tired, the limit is lower).</summary>
+    private static void EaseComfort(float[] a, float loadLimit = ComfortLimit)
     {
         float elevation = a[1];
         for (int pass = 0; pass < 2; pass++)
@@ -595,8 +595,39 @@ public partial class JointLab : Node3D
                 Ease(a, Impinged, 0, TwistGive, 0.5f);
             }
             Ease(a, AcrossChest, 0, AcrossGive, 0.5f);
-            Ease(a, Load, ComfortLimit, LoadGive, 0.05f);
+            Ease(a, Load, loadLimit, LoadGive, 0.05f);
         }
+    }
+
+    /// <summary>How far one joint may be moved to get off a flat step of the scores, degrees.</summary>
+    private const float FlatReach = 40;
+
+    private static bool AcrossFlat(float[] a, Func<float[], float> measure, float[] give)
+    {
+        float now = measure(a), bestCost = float.PositiveInfinity, bestTo = 0;
+        int best = -1;
+        for (int d = 0; d < 7; d++)
+        {
+            if (give[d] == 0) continue;
+            float keep = a[d];
+            foreach (float sign in new[] { -1f, 1f })
+                for (float by = 2; by <= FlatReach; by += 2)
+                {
+                    float to = Mathf.Clamp(keep + sign * by, Dofs[d].Min, Dofs[d].Max);
+                    a[d] = to;
+                    bool lower = measure(a) < now - 0.01f;
+                    a[d] = keep;
+                    if (to == keep) break;
+                    if (!lower) continue;
+                    if (by / give[d] < bestCost) (bestCost, best, bestTo) = (by / give[d], d, to);
+                    break;
+                }
+        }
+        if (best < 0)
+            return false;
+        a[best] = bestTo;
+        Anatomy(a);
+        return true;
     }
 
     /// <summary>
@@ -629,7 +660,13 @@ public partial class JointLab : Node3D
                 norm += g[d] * g[d] * give[d];
             }
             if (norm < 1e-6f)
-                return;
+            {
+                // Flat here (every score on a step, not a ramp): the nearest move of one joint
+                // that brings the measure down at all, cheapest by its give, out to FlatReach.
+                if (!AcrossFlat(a, measure, give))
+                    return;
+                continue;
+            }
             float step = (over + past) / norm;
             for (int d = 0; d < 7; d++)
                 a[d] = Mathf.Clamp(a[d] - step * g[d] * give[d], Dofs[d].Min, Dofs[d].Max);
@@ -788,7 +825,8 @@ public partial class JointLab : Node3D
         dt = Mathf.Min(dt, 1f / 30);
         // Live input (a gamepad, a dragged slider) is followed three times as fast: a cut
         // made with the pad must not trail behind it.
-        float step = Speed * dt * (planning ? 4 : live ? LiveSpeedUp : 1);
+        // Tired, the arm is slower (live input only: a planned jump keeps its pace).
+        float step = Speed * dt * (planning ? 4 : live ? LiveSpeedUp * Freshness : 1);
         // Nothing to do while the sliders stand still and the arms have settled.
         bool goalsStill = true;
         foreach (var arm in _arms)
@@ -844,7 +882,7 @@ public partial class JointLab : Node3D
         float Aim(int g) => _arms[Solved[g].Arm].Aim[Solved[g].Dof];
         // However far the best pose is, the arm moves there at no more than SlideSpeed, so
         // sliding round an obstacle is a visible motion, not a jump.
-        float reach = SlideSpeed * dt * (planning ? 4 : live ? LiveSpeedUp : 1);
+        float reach = SlideSpeed * dt * (planning ? 4 : live ? LiveSpeedUp * Freshness : 1);
         var frameStart = _solveFrame;
         for (int g = 0; g < n; g++)
             frameStart[g] = Angles(g)[Solved[g].Dof];
@@ -1138,6 +1176,7 @@ public partial class JointLab : Node3D
     public override void _Process(double delta)
     {
         Gamepad(Mathf.Min((float)delta, 0.05f));
+        Tire((float)delta);
         Rumble((float)delta);
         BuildContactMap(3);
         // Run independently of Settle's early exit: a foot must finish its step
