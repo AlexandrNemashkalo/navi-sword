@@ -38,6 +38,8 @@ public partial class JointLab
     private float _guardBlend = 1;
     /// <summary>The trunk's turn held through fine work (NaN: not in it).</summary>
     private float _fineTwist = float.NaN;
+    /// <summary>R1 was held last frame (the clutch).</summary>
+    private bool _clutched;
     private Vector3 _padHeld;
     private Label _padStatus = null!, _padValues = null!, _padHelp = null!, _rumbleLabel = null!;
 
@@ -196,10 +198,11 @@ public partial class JointLab
         _calibrateHeld = calibrate;
 
         bool reset = Pressed(JoyButton.RightShoulder);
-        // R1 takes the guard at once and holds it while held: the gyro is centred afresh every
-        // frame, so bringing the pad back to a comfortable hold moves nothing, and where the pad
-        // is as R1 comes up is the guard.
-        if (reset)
+        // R1's first press after the pad comes takes the middle guard: where the pad is then is
+        // its centre. After that R1 is a clutch (DrivePadFor): held, the arm stays exactly as it
+        // is whatever the pad does, and from where the pad is as R1 comes up it goes on.
+        bool firstCentre = reset && !_centred;
+        if (firstCentre)
         {
             _motion.Recenter(Input.GetJoyGravity(_device));
             _padFilter.Reset();
@@ -224,7 +227,8 @@ public partial class JointLab
         Vector2 stick = StickResponse(new Vector2(Input.GetJoyAxis(_device, JoyAxis.RightX), Input.GetJoyAxis(_device, JoyAxis.RightY)));
         float straighten = Mathf.Clamp(Input.GetJoyAxis(_device, JoyAxis.TriggerRight), 0, 1);
         bool fine = Pressed(JoyButton.LeftShoulder);
-        Vector3 p = DrivePadFor(pad, stick, straighten, fine, dt);
+        // (The first centring's own frame drives the arm to the guard; held on, the clutch keeps it.)
+        Vector3 p = DrivePadFor(pad, stick, straighten, fine, dt, reset && !firstCentre);
 
         Status(fine ? $"{name}: работает — L1, предплечье и кисть." : $"{name}: работает — плечо.", Working);
         string what = fine ? "от нажатия L1" : "от центра (R1)";
@@ -243,13 +247,41 @@ public partial class JointLab
     /// from its centre (or from where L1 went down). Public so tests can play a pad.
     /// </summary>
     public Vector3 DrivePad(Vector3 pad, Vector2 stick, float straighten, bool fine)
-        => DrivePadFor(pad, stick, straighten, fine, 1f / 60);
+        => DrivePadFor(pad, stick, straighten, fine, 1f / 60, false);
 
-    private Vector3 DrivePadFor(Vector3 pad, Vector2 stick, float straighten, bool fine, float dt)
+    /// <summary>For tests: the pad with R1 held (the clutch) or not.</summary>
+    public Vector3 DrivePadClutched(Vector3 pad, Vector2 stick, float straighten, bool fine, bool r1)
+        => DrivePadFor(pad, stick, straighten, fine, 1f / 60, r1);
+
+    private Vector3 DrivePadFor(Vector3 pad, Vector2 stick, float straighten, bool fine, float dt, bool clutch)
     {
+        float[] t = _arms[0].Target;
+        // R1 held: the clutch. Nothing the pad does reaches the arm, not a hair (the filter is
+        // not fed either, so it does not drag the old attitude after).
+        if (clutch)
+        {
+            _clutched = true;
+            return Vector3.Zero;
+        }
+        bool released = _clutched;
+        _clutched = false;
+        if (released)
+            _padFilter.Reset();
         // Filtered in radians, the units its settings are tuned in.
         pad = _padFilter.Filter(pad * (Mathf.Pi / 180), dt) * (180 / Mathf.Pi);
-        float[] t = _arms[0].Target;
+        if (released)
+        {
+            // Let go: the pad as it is now stands for the arm as it is now, in either mode.
+            _padCentre = pad - new Vector3((t[1] - GuardElevation) / ShoulderGain, SwingTurn(t[0]), -t[2] / TwistGain);
+            _elbowRest = t[3] - 60 * stick.Y;
+            _turnRest = t[4] + 80 * stick.X;
+            if (_fine && fine)
+            {
+                t.CopyTo(_held, 0);
+                _padHeld = pad;
+                _guardBlend = 1;
+            }
+        }
         var want = (float[])t.Clone();
         if (fine && !_fine)
         {
