@@ -3,3 +3,6 @@
 /android/
 bin/
 obj/
+
+# Exported builds
+/navi-sword-realese-win/

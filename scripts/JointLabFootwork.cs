@@ -6,7 +6,11 @@ using Godot;
 /// Walking, the feet step in turn without a pause, each set down where its place will be
 /// half a stride on (so neither drags behind), the leading foot first: forward the front foot,
 /// back the rear one, to the side the one on that side. The body rides each step: up a little
-/// as it passes over the standing foot, its weight over that foot.
+/// as it passes over the standing foot, its weight over that foot. Running (faster than
+/// WalkSpeed, up to RunSpeed) the steps come quicker and higher, without a pause, each foot
+/// set down only as far ahead as it will be behind when it goes up again (at a walk's reach
+/// the leg was straight before the foot came down). In the air (a jump) no foot steps: both
+/// go with the body, lifted by the caller's `air`.
 /// </summary>
 public sealed class JointLabFootwork
 {
@@ -22,6 +26,10 @@ public sealed class JointLabFootwork
     private const float Standing = 0.05f;
     /// <summary>The step's duration standing and at a full walk (WalkSpeed), seconds; how high the foot lifts.</summary>
     private const float StepStanding = 0.3f, StepWalking = 0.24f, WalkSpeed = 1.1f;
+    /// <summary>Running: the fastest run (m/s), its step (seconds), the pause between steps, and the foot's lift (metres).</summary>
+    private const float RunSpeed = 2.4f, StepRunning = 0.17f, PauseWalking = 0.08f, PauseRunning = 0.02f, LiftRunning = 0.12f;
+    private Vector3 _movedBefore;
+    private bool _movedKnown;
     /// <summary>How far the body rises over the standing foot, and leans its way, metres.</summary>
     private const float Rise = 0.014f, Sway = 0.012f;
     /// <summary>How far the body sinks into the knees walking at full speed, metres: a fencer moves with them bent.</summary>
@@ -100,8 +108,27 @@ public sealed class JointLabFootwork
     /// Steps the feet: `twistDegrees` the trunk's turn, `moved` how far the fighter has walked
     /// from where he started (world), `velocity` how fast he walks now.
     /// </summary>
-    public bool Update(float twistDegrees, float dt, Vector3 moved, Vector3 velocity, Vector3 front = default, Vector3 rear = default)
+    public bool Update(float twistDegrees, float dt, Vector3 moved, Vector3 velocity, Vector3 front = default, Vector3 rear = default,
+        float air = 0, bool airborne = false)
     {
+        // In the air both feet go with the body; landing, they are set down where they came.
+        Vector3 carried = _movedKnown ? moved - _movedBefore : Vector3.Zero;
+        (_movedBefore, _movedKnown) = (moved, true);
+        carried.Y = 0;
+        if (airborne)
+        {
+            // A step under way at the take-off is broken off: the foot leaves the ground where it is.
+            if (_active >= 0)
+            {
+                _feet[_active].Origin = new Vector3(_feet[_active].Origin.X, _from.Origin.Y, _feet[_active].Origin.Z);
+                _lastStepped = _active;
+                _active = -1;
+            }
+            for (int i = 0; i < 2; i++)
+                _feet[i].Origin += carried;
+            _from.Origin += carried;
+            _to.Origin += carried;
+        }
         // A lunge (front, rear: how far beyond the body's place each foot goes): the front foot
         // steps out quickly, the rear one hardly moves. The right foot leads.
         bool lunging = front.LengthSquared() > 0.0004f || _lunged;
@@ -119,13 +146,17 @@ public sealed class JointLabFootwork
         Vector3 centre = (_rest[0].Origin + _rest[1].Origin) * 0.5f;
         // Walking, each foot goes where its place will be when the other is next set down.
         float walk = Mathf.Clamp(speed / WalkSpeed, 0, 1);
-        _crouch = Mathf.MoveToward(_crouch, walk, dt * 3);
-        float stepTime = walking ? Mathf.Lerp(StepStanding, StepWalking, walk) : StepStanding;
-        Vector3 ahead = moved + velocity * stepTime;
+        float run = Mathf.Clamp((speed - WalkSpeed) / (RunSpeed - WalkSpeed), 0, 1);
+        _crouch = Mathf.MoveToward(_crouch, walk + run, dt * 3);
+        float stepTime = walking ? Mathf.Lerp(Mathf.Lerp(StepStanding, StepWalking, walk), StepRunning, run) : StepStanding;
+        float pause = Mathf.Lerp(PauseWalking, PauseRunning, run);
+        // Walking a foot goes a step's time ahead; running, half its time down (StepRunning / 2 +
+        // the pause) — so it is as far behind when it goes up again.
+        Vector3 ahead = moved + velocity * Mathf.Lerp(stepTime, stepTime / 2 + pause, run);
         Vector3 frontExtra = front, rearExtra = rear;
         Transform3D Target(int i) => new(turn * _rest[i].Basis, centre + ahead + (i == 1 ? frontExtra : rearExtra) + turn * (_rest[i].Origin - centre));
         if (lunging) stepTime = LungeStep;
-        if (_active < 0 && (_pause <= 0 || walking || lunging))
+        if (_active < 0 && !airborne && (_pause <= 0 || walking || lunging))
         {
             int best = -1;
             float worst = walking ? 0.02f : lunging ? 0.04f : 0.055f;
@@ -149,14 +180,14 @@ public sealed class JointLabFootwork
                 _to = Target(best);
                 _time = 0;
                 _stepTime = stepTime;
-                _lift = lunging ? 0.05f : Mathf.Lerp(0.05f, 0.085f, walk);
+                _lift = lunging ? 0.05f : Mathf.Lerp(Mathf.Lerp(0.05f, 0.085f, walk), LiftRunning, run);
                 changed = true;
             }
         }
         if (_active >= 0)
         {
             // Under way, the step's end follows the target (the fighter keeps walking).
-            if (walking || lunging)
+            if ((walking || lunging) && !airborne)
                 _to = _to.InterpolateWith(Target(_active), Mathf.Clamp(dt * (lunging ? 20 : 8), 0, 1));
             _time = Mathf.Min(1, _time + dt / _stepTime);
             float blend = _time * _time * (3 - 2 * _time);
@@ -171,7 +202,7 @@ public sealed class JointLabFootwork
             {
                 _lastStepped = _active;
                 _active = -1;
-                _pause = 0.08f;
+                _pause = pause;
             }
         }
         else
@@ -179,11 +210,12 @@ public sealed class JointLabFootwork
             Bob = Bob.Lerp(Vector3.Down * (Crouch * _crouch), Mathf.Clamp(dt * 10, 0, 1));
             if (!walking) _lastStepped = -1;
         }
+        changed |= airborne || air != 0;
         for (int i = 0; i < 2; i++)
         {
             Vector3 hip = World(_hip[i]).Origin;
             Basis pivot = _feet[i].Basis * _rest[i].Basis.Inverse();
-            var (knee, ankle) = LimbSolver.Solve(hip, _feet[i].Origin, hip + pivot * _pole[i],
+            var (knee, ankle) = LimbSolver.Solve(hip, _feet[i].Origin + Vector3.Up * air, hip + pivot * _pole[i],
                 _upper[i], _lower[i], Mathf.DegToRad(2), Mathf.DegToRad(150));
             Vector3 hinge = (knee - hip).Cross(ankle - knee).Normalized();
             Rotate(_hip[i], LimbSolver.Frame(knee - hip, hinge, _upperHinge[i]));

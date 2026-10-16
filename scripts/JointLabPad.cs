@@ -12,8 +12,9 @@ using Godot;
 /// was — tilt bends the elbow, turn swings the forearm by turning the arm in the shoulder,
 /// roll turns the forearm — while the right stick bends and tilts the hand.
 ///
-/// Every change of mode picks up from where the arm is, so nothing jumps. R1 takes the pad's
-/// present attitude as the guard; △ calibrates the gyro (pad on the table).
+/// Every change of mode picks up from where the arm is, so nothing jumps. R1 pauses input,
+/// a short tap returns to guard, a long hold only pauses; held, the right stick turns the camera
+/// round the fighter (R3 puts it back behind him). △ calibrates the gyro (pad on the table).
 /// </summary>
 public partial class JointLab
 {
@@ -40,7 +41,20 @@ public partial class JointLab
     private float _fineTwist = float.NaN;
     /// <summary>R1 was held last frame (the clutch).</summary>
     private bool _clutched;
+    private float _clutchTime;
+    private bool _returningToGuard, _returnRebase;
+    private float _returnTime, _returnDuration;
+    private const float ClutchDelay = 0.3f, ClutchReturnTime = 0.2f, FineReturnTime = 0.8f;
+    private readonly float[] _clutchFrom = new float[7];
+    private static readonly float[] ClutchGuard = { GuardPlane, GuardElevation, 0, GuardElbow, 0, 0, 0 };
     private Vector3 _padHeld;
+    /// <summary>The right stick turned the camera in this hold of R1: then letting go is not a tap.</summary>
+    private bool _clutchSteered;
+    /// <summary>R1 let go with the stick still over: the stick drives the arm again only once back at the centre.</summary>
+    private bool _stickLatched;
+    private bool _recentreHeld, _cameraClutch;
+    /// <summary>How fast the stick turns the camera at full tilt, degrees a second; and the tilt it starts from.</summary>
+    private const float CameraTurnSpeed = 180, CameraStickFrom = 0.2f;
     private Label _padStatus = null!, _padValues = null!, _padHelp = null!, _rumbleLabel = null!;
 
     /// <summary>
@@ -49,6 +63,19 @@ public partial class JointLab
     /// it was 5.4, just into II).
     /// </summary>
     private const float GuardPlane = 80, GuardElevation = 38, GuardElbow = 70;
+    /// <summary>
+    /// The guard with both hands on the handle: the elbows bent more and out to the sides — the
+    /// upper arm raised (55° instead of 38°) and turned in (30°), the hands brought before the
+    /// chest by the forearms — so the sword is moved by the arms about it, not held out at their
+    /// end. Lower, the upper arms hung against the ribs and the elbows came together (0.30 m
+    /// apart; so, 0.35).
+    /// </summary>
+    private const float TwoHandGuardElbow = 105, TwoHandGuardElevation = 55, TwoHandGuardRotation = 30;
+    private float GuardElbowNow => _twoHanded ? TwoHandGuardElbow : GuardElbow;
+    private float GuardElevationNow => _twoHanded ? TwoHandGuardElevation : GuardElevation;
+    private float GuardRotationNow => _twoHanded ? TwoHandGuardRotation : 0;
+    /// <summary>The guard's angle for a joint, as now held (one hand or two).</summary>
+    private float GuardNow(int d) => d switch { 1 => GuardElevationNow, 2 => GuardRotationNow, 3 => GuardElbowNow, _ => ClutchGuard[d] };
     /// <summary>Degrees of joint per degree of pad: a comfortable wrist turn covers the arm's range.</summary>
     private const float ShoulderGain = 1.5f, TwistGain = 1.2f, ForearmGain = 1.5f;
     /// <summary>Turning the pad left/right carries the arm across or out: the wrist turns less
@@ -63,21 +90,46 @@ public partial class JointLab
     /// left) so the whole way back is this far.
     /// </summary>
     private const float SwingBackReach = 35;
+    /// <summary>
+    /// How far the pad turns left to carry the arm all the way across (to SwingAcrossMax),
+    /// degrees: the gain grows from SwingGain at the centre as it does to the right.
+    /// </summary>
+    private const float SwingAcrossReach = 30;
+    /// <summary>
+    /// The plane (from the front) the arm goes across to. The anatomy's 130° is from the chest;
+    /// from the front the trunk's turn (up to TwistMax) comes on top. Held to 130° from the front,
+    /// a cut from the right stopped with the arm at 70° from the chest, the trunk having done
+    /// the rest, the sword pointing back up over the shoulder.
+    /// </summary>
+    private const float SwingAcrossMax = 175;
+    /// <summary>
+    /// Raised between these elevations the reach across comes back to the anatomy's 130°: overhead
+    /// the trunk's turn does not carry the arm round (the head is in the way), and asked for 175°
+    /// the arm stuck against the head at 114°.
+    /// </summary>
+    private const float AcrossHighFrom = 80, AcrossHighTo = 110;
+
+    /// <summary>The furthest across (from the front) the pad carries the arm at this elevation.</summary>
+    private static float AcrossLimit(float elevation)
+        => Mathf.Lerp(SwingAcrossMax, Dofs[0].Max, Mathf.SmoothStep(AcrossHighFrom, AcrossHighTo, elevation));
     /// <summary>In fine work (L1) the shoulder still follows the pad by this share of its gain out of it.</summary>
     private const float FineShoulder = 0.25f;
     /// <summary>The growth of the gain to the right: plane = guard − g·r − c·r² for r degrees turned right.</summary>
     private static float SwingBackCurve => (GuardPlane - Dofs[0].Min - SwingGain * SwingBackReach) / (SwingBackReach * SwingBackReach);
+    /// <summary>The same to the left: plane = guard + g·l + c·l² for l degrees turned left.</summary>
+    private const float SwingAcrossCurve = (SwingAcrossMax - GuardPlane - SwingGain * SwingAcrossReach) / (SwingAcrossReach * SwingAcrossReach);
 
     /// <summary>The plane of elevation (from the front) for the pad turned right by this many degrees (left negative).</summary>
     private static float SwingPlane(float right)
-        => right <= 0 ? GuardPlane - SwingGain * right : GuardPlane - SwingGain * right - SwingBackCurve * right * right;
+        => right <= 0 ? GuardPlane - SwingGain * right + SwingAcrossCurve * right * right
+            : GuardPlane - SwingGain * right - SwingBackCurve * right * right;
 
     /// <summary>How far right the pad is turned for a plane of elevation: SwingPlane's inverse.</summary>
     private static float SwingTurn(float plane)
     {
         float back = GuardPlane - plane;
         if (back <= 0)
-            return back / SwingGain;
+            return -(-SwingGain + Mathf.Sqrt(SwingGain * SwingGain - 4 * SwingAcrossCurve * back)) / (2 * SwingAcrossCurve);
         return (-SwingGain + Mathf.Sqrt(SwingGain * SwingGain + 4 * SwingBackCurve * back)) / (2 * SwingBackCurve);
     }
 
@@ -149,6 +201,13 @@ public partial class JointLab
             {
                 _device = found;
                 _centred = false;
+                _clutched = false;
+                _clutchTime = 0;
+                _returningToGuard = _returnRebase = false;
+                _dodgeHeld = false;
+                _dodgeResetCentre = false;
+                _dodgeAttitudeKnown = false;
+                SetDodge(0, 0, 0, 0, 0);
                 if (_device >= 0 && Input.HasJoyMotionSensors(_device))
                 {
                     // The sensors are off until asked for; then a short calibration at rest.
@@ -158,9 +217,9 @@ public partial class JointLab
                 }
             }
         }
-        _padHelp.Text = "Левый стик (или WASD) — ходьба в стойке.\n"
+        _padHelp.Text = "Левый стик (или WASD) — ходьба в стойке; зажать L3 (Shift) — бег; ✕ (пробел) — прыжок.\n"
             + "Обычно: гироскоп — плечо; стик ↑↓ — локоть, ←→ — поворот предплечья; R2 — разогнуть локоть.\n"
-            + "Держи L1: гироскоп — предплечье, стик — кисть.\nR1 — центр (средняя стойка), △ — калибровка.";
+            + "L1: предплечье и кисть. L2: гироскоп — уклонение корпусом.\nR1: коротко — в стойку; держи — замри, правый стик ←→ — камера; R3 — камера за спину. △ — калибровка.";
         if (_device < 0)
         {
             Status("Геймпад не найден. Рукой управляют ползунки справа.", Missing);
@@ -199,15 +258,15 @@ public partial class JointLab
 
         bool reset = Pressed(JoyButton.RightShoulder);
         // R1's first press after the pad comes takes the middle guard: where the pad is then is
-        // its centre. After that R1 is a clutch (DrivePadFor): held, the arm stays exactly as it
-        // is whatever the pad does, and from where the pad is as R1 comes up it goes on.
+        // its centre. Later short taps return to guard; long holds only freeze input.
         bool firstCentre = reset && !_centred;
         if (firstCentre)
         {
             _motion.Recenter(Input.GetJoyGravity(_device));
+            _dodgeAttitudeKnown = false;
             _padFilter.Reset();
             _padCentre = Vector3.Zero;
-            _elbowRest = GuardElbow;
+            _elbowRest = GuardElbowNow;
             _turnRest = 0;
             _fine = false;
             _centred = true;
@@ -221,16 +280,18 @@ public partial class JointLab
         }
 
         _motion.Update(raw, Input.GetJoyGravity(_device), Input.GetJoyAccelerometer(_device), dt, 2.0f, 1.8f);
-        Vector3 gesture = SwordMotionModel.ForearmGesture(_motion.Attitude);
-        // Degrees: nose up +, turned right +, rolled right +.
-        Vector3 pad = new(Mathf.RadToDeg(gesture.X), Mathf.RadToDeg(gesture.Y), -Mathf.RadToDeg(gesture.Z));
-        Vector2 stick = StickResponse(new Vector2(Input.GetJoyAxis(_device, JoyAxis.RightX), Input.GetJoyAxis(_device, JoyAxis.RightY)));
+        Vector2 stick = Mirrored(StickResponse(new Vector2(Input.GetJoyAxis(_device, JoyAxis.RightX), Input.GetJoyAxis(_device, JoyAxis.RightY))));
+        stick = CameraStick(stick, reset && !firstCentre, Pressed(JoyButton.RightStick), dt);
         float straighten = Mathf.Clamp(Input.GetJoyAxis(_device, JoyAxis.TriggerRight), 0, 1);
         bool fine = Pressed(JoyButton.LeftShoulder);
         // (The first centring's own frame drives the arm to the guard; held on, the clutch keeps it.)
-        Vector3 p = DrivePadFor(pad, stick, straighten, fine, dt, reset && !firstCentre);
+        Vector3 p = DrivePadAttitude(_motion.Attitude, stick, straighten, fine, reset && !firstCentre,
+            Input.GetJoyAxis(_device, JoyAxis.TriggerLeft), dt);
 
-        Status(fine ? $"{name}: работает — L1, предплечье и кисть." : $"{name}: работает — плечо.", Working);
+        Status(_dodgeHeld ? $"{name}: L2 — уклонение корпусом, гироскоп управляет телом."
+            : reset ? $"{name}: меч удерживается — можно перехватить геймпад."
+            : _returningToGuard ? $"{name}: плавный возврат в стойку."
+            : fine ? $"{name}: работает — L1, предплечье и кисть." : $"{name}: работает — плечо.", Working);
         string what = fine ? "от нажатия L1" : "от центра (R1)";
         _padValues.Text = rawLine + "\n"
             + $"Наклон носом вверх: {p.X,5:0}°  {what}\n"
@@ -239,6 +300,47 @@ public partial class JointLab
             + $"Правый стик: ←→ {stick.X,5:0.00}   ↑↓ {stick.Y,5:0.00}\n"
             + $"R2 (разогнуть локоть): {straighten:0.00}";
     }
+
+    /// <summary>
+    /// The right stick while R1 is held turns the camera (the arm is still then, the stick free);
+    /// R3 puts the camera back where it started. Returns the stick as the arm is to have it: let
+    /// go of R1 with the stick still over and it would have become the elbow's and forearm's new
+    /// rest, the arm then moving by itself as the stick sprang back — so it counts for nothing
+    /// until it has been back at the centre.
+    /// </summary>
+    private Vector2 CameraStick(Vector2 stick, bool clutch, bool recentre, float dt)
+    {
+        if (recentre && !_recentreHeld)
+            SetOrbit(CameraOrbit);
+        _recentreHeld = recentre;
+        if (clutch && !_cameraClutch)
+            _clutchSteered = false;
+        _cameraClutch = clutch;
+        if (clutch)
+        {
+            if (Mathf.Abs(stick.X) > CameraStickFrom)
+            {
+                // Right moves the camera to its right round the fighter.
+                SetOrbit(Mathf.Wrap(_orbit + CameraTurnSpeed * stick.X * dt, -180, 180));
+                _clutchSteered = true;
+            }
+            _stickLatched = stick.Length() > CameraStickFrom;
+            return stick;
+        }
+        if (_stickLatched && stick.Length() <= CameraStickFrom)
+            _stickLatched = false;
+        return _stickLatched ? Vector2.Zero : stick;
+    }
+
+    private void SetOrbit(float degrees)
+    {
+        _orbit = degrees;
+        _cameraSlider.SetValueNoSignal(degrees);
+        PlaceCamera();
+    }
+
+    /// <summary>For tests: the right stick and R3 as the pad's loop reads them, R1 held or not; returns the stick left to the arm.</summary>
+    public Vector2 CameraStickFor(Vector2 stick, bool r1, bool r3, float dt) => CameraStick(stick, r1, r3, dt);
 
     /// <summary>
     /// The pad's attitude (degrees: nose up, turned right, rolled right), the right stick, R2
@@ -256,15 +358,69 @@ public partial class JointLab
     private Vector3 DrivePadFor(Vector3 pad, Vector2 stick, float straighten, bool fine, float dt, bool clutch)
     {
         float[] t = _arms[0].Target;
-        // R1 held: the clutch. Nothing the pad does reaches the arm, not a hair (the filter is
-        // not fed either, so it does not drag the old attitude after).
+        // Holding never moves the targets. Only releasing a short tap starts the return.
         if (clutch)
         {
+            if (!_clutched)
+            {
+                t.CopyTo(_clutchFrom, 0);
+                _clutchTime = 0;
+                _returningToGuard = _returnRebase = false;
+            }
             _clutched = true;
+            _clutchTime += dt;
             return Vector3.Zero;
         }
-        bool released = _clutched;
+        bool released = _clutched || _returnRebase;
+        // Re-enter fine work from the current interpolated pose, not a stale return target.
+        if (fine && !_fine && _returningToGuard)
+        {
+            _returningToGuard = false;
+            released = true;
+        }
+        bool leavingFine = !fine && _fine;
+        bool tappedReset = _clutched && _clutchTime < ClutchDelay && !_clutchSteered;
+        if (leavingFine || tappedReset)
+        {
+            t.CopyTo(_clutchFrom, 0);
+            _returnTime = 0;
+            _returnDuration = tappedReset ? ClutchReturnTime : FineReturnTime;
+            _returningToGuard = true;
+        }
+        if (leavingFine)
+        {
+            _fine = false;
+            _fineTwist = float.NaN;
+            _thrustKnown = false;
+            _thrustTwist = float.NaN;
+            _lungeWanted = 0;
+            ThrustReached = Vector2.Zero;
+            _guardBlend = 1;
+        }
         _clutched = false;
+        _returnRebase = false;
+        if (_returningToGuard)
+        {
+            _edgeTurn = 0;
+            _edgeTipKnown = false;
+            _followWrist = Vector2.Zero;
+            _followMomentum = 0;
+            _returnTime += dt;
+            float blend = Mathf.SmoothStep(0, 1, Mathf.Clamp(_returnTime / _returnDuration, 0, 1));
+            for (int d = 0; d < Dofs.Length; d++)
+            {
+                t[d] = Mathf.Lerp(_clutchFrom[d], GuardNow(d), blend);
+                _arms[0].Touched[d] = 0;
+                _arms[0].Sliders[d].SetValueNoSignal(t[d]);
+                _arms[0].Values[d].Text = $"{t[d]:0}°";
+            }
+            if (_returnTime >= _returnDuration)
+            {
+                _returningToGuard = false;
+                _returnRebase = true;
+            }
+            return Vector3.Zero;
+        }
         if (released)
             _padFilter.Reset();
         // Filtered in radians, the units its settings are tuned in.
@@ -272,9 +428,9 @@ public partial class JointLab
         if (released)
         {
             // Let go: the pad as it is now stands for the arm as it is now, in either mode.
-            _padCentre = pad - new Vector3((t[1] - GuardElevation) / ShoulderGain, SwingTurn(t[0]), -t[2] / TwistGain);
+            _padCentre = pad - new Vector3((t[1] - GuardElevationNow) / ShoulderGain, SwingTurn(t[0]), -(t[2] - GuardRotationNow) / TwistGain);
             _elbowRest = t[3] - 60 * stick.Y;
-            _turnRest = t[4] + 80 * stick.X;
+            _turnRest = t[4] - _edgeTurn + 80 * stick.X;
             if (_fine && fine)
             {
                 t.CopyTo(_held, 0);
@@ -294,15 +450,6 @@ public partial class JointLab
             _guardTo = PointForward(_held);
             _guardBlend = 0;
         }
-        else if (!fine && _fine)
-        {
-            _fineTwist = float.NaN;
-            // Back to the shoulder: the pad's present attitude stands for where the arm is now,
-            // and the stick's rest for where the elbow and forearm are now.
-            _padCentre = pad - new Vector3((t[1] - GuardElevation) / ShoulderGain, SwingTurn(t[0]), -t[2] / TwistGain);
-            _elbowRest = t[3] - 60 * stick.Y;
-            _turnRest = t[4] + 80 * stick.X;
-        }
         _fine = fine;
 
         Vector3 p;
@@ -310,10 +457,27 @@ public partial class JointLab
         {
             p = pad - _padCentre;
             want[0] = SwingPlane(p.Y);                     // turned right: the arm goes out to the side and back
-            want[1] = GuardElevation + ShoulderGain * p.X; // nose up: the arm rises
-            want[2] = -TwistGain * p.Z;                    // rolled right: the arm turns outward
+            want[1] = GuardElevationNow + ShoulderGain * p.X; // nose up: the arm rises
+            want[0] = Mathf.Min(want[0], AcrossLimit(want[1]));
+            want[2] = GuardRotationNow - TwistGain * p.Z;  // rolled right: the arm turns outward
             want[3] = _elbowRest + 60 * stick.Y;           // stick down bends the elbow
             want[4] = _turnRest - 80 * stick.X;            // stick right turns the palm up
+            want[4] += EdgeTurn(want[4], want[1], Mathf.Abs(want[0] - t[0]) / dt, true, dt); // a cut turns the edge into it (JointLabEdge)
+            FollowCut(want, t, _cutVelocity, _cutSwinging, true, dt);  // and the wrist carries it on (JointLabFollow)
+            // A high lift from a backswing must come around the shoulder, not try
+            // to extend the arm vertically behind the back. Preserve low cuts;
+            // progressively favour elevation over backward reach above 90 degrees.
+            float liftAssist = Mathf.SmoothStep(90, 120, want[1]);
+            if (liftAssist > 0)
+            {
+                float originalPlane = want[0];
+                float lowest = PlaneFor(Mathf.Clamp(want[1], 0, 155)).Lowest;
+                for (int i = 0; i < 8; i++)
+                {
+                    float reachable = lowest + TrunkTwist(want);
+                    want[0] = Mathf.Lerp(originalPlane, Mathf.Max(originalPlane, reachable), liftAssist);
+                }
+            }
         }
         else
         {
@@ -335,6 +499,9 @@ public partial class JointLab
             want[4] = _held[4] - ForearmGain * p.Z;        // rolled right turns the palm up
             want[5] = _held[5] + 45 * stick.Y;             // stick down bends the hand to the palm
             want[6] = _held[6] + 17 * stick.X;             // stick right tilts it to the thumb
+            EdgeTurn(want[4], want[1], 0, false, dt);
+            _followWrist = Vector2.Zero;
+            _followMomentum = 0;
         }
         // R2: out of fine work it straightens the elbow (a cut's end); in it, it thrusts.
         if (fine)
@@ -346,7 +513,7 @@ public partial class JointLab
 
         for (int d = 0; d < Dofs.Length; d++)
         {
-            float value = Mathf.Clamp(want[d], Dofs[d].Min, Dofs[d].Max);
+            float value = Mathf.Clamp(want[d], Dofs[d].Min, GoalMax(0, d));
             if (value == t[d])
                 continue;
             t[d] = value;
@@ -456,10 +623,18 @@ public partial class JointLab
     /// <summary>For tests: the pad is centred (as R1 does), without a device.</summary>
     public void CentrePad()
     {
+        _dodgeAttitudeKnown = false;
+        _clutched = false;
+        _clutchTime = 0;
+        _returningToGuard = _returnRebase = false;
         _padFilter.Reset();
         _padCentre = Vector3.Zero;
-        _elbowRest = GuardElbow;
+        _elbowRest = GuardElbowNow;
         _turnRest = 0;
+        _edgeTurn = 0;
+        _edgeTipKnown = false;
+        // The bend is left to come back by itself: cleared here it would stay in the wrist's target.
+        _followMomentum = 0;
         _fine = false;
     }
 }

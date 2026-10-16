@@ -20,7 +20,6 @@ public partial class JointLab
     /// <summary>Constraint rows: 4 upper arm, 4 forearm, knuckle, fingertip, 12 blade, 2 pommel, 5 guard; then the sword in the arms.</summary>
     private const int PointRows = 29, ArmsRow = 29, Rows = 30;
     private static readonly float[] UpperSamples = { 0.5f, 0.65f, 0.8f, 1f }, ForeSamples = { 0.25f, 0.5f, 0.75f, 1f };
-    private static readonly float[] PommelSamples = { PommelFrom, (PommelFrom + PommelTo) / 2 };
     private readonly float[] _rows = new float[Rows], _rowsNow = new float[Rows], _rowsUp = new float[Rows], _rowsDown = new float[Rows];
     private readonly float[,] _normals = new float[Rows, 11];
     private readonly float[] _slideFrom = new float[11], _slideStep = new float[11], _slideTangent = new float[11],

@@ -27,6 +27,17 @@ public partial class JointLab : Node3D
     };
     // Shoulder girdle coupling to elevation (equality constraints in myoarm_r_assets.xml).
     private const float ClavicleElevation = 0.1025f, ClavicleRetraction = 0.242f;
+    /// <summary>
+    /// Carried across the chest, the shoulder blade slides forward round the ribs and takes the
+    /// clavicle with it (protraction, up to some 30°). The model couples the clavicle to elevation
+    /// only, so its shoulder stayed back and a straight arm met the chest at 78° across (from
+    /// the chest), a cut from the right stopping there; with it the arm goes on to 100°. From
+    /// AcrossFrom the clavicle comes forward, all of ProtractionMost by the plane's limit, once
+    /// the arm is off the side (with it hanging the plane means little).
+    /// </summary>
+    private const float AcrossFrom = 60, ProtractionMost = 30;
+    private static float Protraction(float[] a)
+        => ProtractionMost * Mathf.SmoothStep(AcrossFrom, Dofs[0].Max, a[0]) * Mathf.Clamp(a[1] / 20, 0, 1);
 
     private sealed class Arm
     {
@@ -61,6 +72,7 @@ public partial class JointLab : Node3D
     [Export(PropertyHint.Range, "-180,180,1")]
     public float CameraOrbit { get; set; } = 180;
     private float _orbit;
+    private HSlider _cameraSlider = null!;
     /// <summary>The camera from behind: how far, how high over the chest, how far to the right, and how far ahead of the fighter it looks (metres).</summary>
     [Export] public float CameraDistance { get; set; } = 2.7f;
     [Export] public float CameraHeight { get; set; } = 0.5f;
@@ -76,6 +88,15 @@ public partial class JointLab : Node3D
     /// </summary>
     private float _twist = float.NaN;
     private const float Bladed = 30, TwistShare = 0.5f, TwistMin = -45, TwistMax = 60;
+    /// <summary>
+    /// With both hands on the handle the hands stay before the middle of the chest and the trunk
+    /// turns for them, three quarters of the way the sword arm goes (from TwoHandCentre, where
+    /// the chest is square to it); at the guard the free shoulder comes a little forward
+    /// (SquareOn, negative). Bladed as with one hand, and turning only half the way, the free
+    /// shoulder was so far back that its hand could not come to the handle: the sword hand was
+    /// right of the middle and the free arm came to its limits (across 130°, turned in 80°) 4–13 cm short.
+    /// </summary>
+    private const float SquareOn = -12, TwoHandShare = 0.75f, TwoHandCentre = 100;
     /// <summary>How the upper body has moved with the turn (skeleton space): the arms are worked out unturned, then moved by this.</summary>
     private Transform3D _turn = Transform3D.Identity;
     private int _spine1, _spine2, _neck, _head;
@@ -94,7 +115,7 @@ public partial class JointLab : Node3D
     private Basis _grip;
     private Vector3 _palm;
     /// <summary>Blade and pommel along the one-handed sword's local Y (before scaling), and their half-thickness in metres.</summary>
-    private const float BladeFrom = 0.19f, BladeTo = 1.31f, PommelFrom = -0.09f, PommelTo = -0.03f;
+    private const float BladeFrom = 0.19f, BladeTo = 1.31f; // the pommel's: PommelFrom, PommelTo (JointLabTwoHands: the handle can be longer)
     private const float BladeRadius = 0.018f, PommelRadius = 0.025f;
     /// <summary>The crossguard: across the blade along the edges (local X), at this height, this long either side.</summary>
     private const float GuardAt = 0.186f, GuardReach = 0.155f, GuardRadius = 0.014f;
@@ -209,16 +230,21 @@ public partial class JointLab : Node3D
         // the palm below the knuckles, a grip's radius and a finger's thickness from them on the
         // palm side and PalmDepth back towards the wrist, so the fingers wrap all the way round it. The true edge faces the way the second
         // knuckles do, forward of the fist.
+        // The same for the free hand (both hands on the handle, JointLabTwoHands).
+        (_grip, _palm) = GripOf(0, "r");
+        (_gripLeft, _palmLeft) = GripOf(1, "l");
+        _gripLeftKnown = true;
+        (Basis, Vector3) GripOf(int armIndex, string s)
         {
-            Transform3D hand = _skeleton.GetBoneGlobalPose(_arms[0].Hand);
+            Transform3D hand = _skeleton.GetBoneGlobalPose(_arms[armIndex].Hand);
             Vector3 Local(string bone) => hand.AffineInverse() * At(bone);
             Vector3 Average(params string[] bones)
             {
                 Vector3 sum = Vector3.Zero;
-                foreach (string bone in bones) sum += Local(bone + ".r");
+                foreach (string bone in bones) sum += Local(bone + "." + s);
                 return sum / bones.Length;
             }
-            Vector3 across = (Local("index_01.r") - Local("ring_01.r")).Normalized();
+            Vector3 across = (Local("index_01." + s) - Local("ring_01." + s)).Normalized();
             Vector3 knuckles = Average("index_01", "middle_01", "ring_01");
             Vector3 distal = knuckles - (knuckles.Dot(across)) * across; // wrist to knuckles, square to the grip
             Vector3 along = (across * Mathf.Cos(Mathf.DegToRad(30)) + distal.Normalized() * Mathf.Sin(Mathf.DegToRad(30))).Normalized();
@@ -226,11 +252,11 @@ public partial class JointLab : Node3D
             // The palm side: where the closed fist's fingertips are, square to the knuckle line.
             Vector3 curl = Average("index_03", "middle_03", "ring_03") - knuckles;
             Vector3 palmward = (curl - across * curl.Dot(across) - distal * curl.Dot(distal)).Normalized();
-            float finger = Mathf.Min(0.012f, _body.Radius(Bone("middle_02.r"), At("middle_02.r"), At("middle_03.r")));
+            float finger = Mathf.Min(0.012f, _body.Radius(Bone("middle_02." + s), At("middle_02." + s), At("middle_03." + s)));
             // Deep in the palm, at the palm crease below the finger bases, not at the fingers.
-            _palm = knuckles + palmward * (GripRadius * SwordScale + finger) - distal * PalmDepth;
+            Vector3 palm = knuckles + palmward * (GripRadius * SwordScale + finger) - distal * PalmDepth;
             Vector3 edge = (distal - along * distal.Dot(along)).Normalized();
-            _grip = new Basis(edge, along, edge.Cross(along).Normalized()).Orthonormalized();
+            return (new Basis(edge, along, edge.Cross(along).Normalized()).Orthonormalized(), palm);
         }
         _sword = MakeSword();
         AddChild(_sword);
@@ -309,7 +335,7 @@ public partial class JointLab : Node3D
     private static ArmPose Pose(Arm arm, float[] a)
     {
         // Thorax-frame rotations of the model (right arm; the left is its mirror image via Side).
-        Quaternion clavicle = R(Vector3.Up, -ClavicleRetraction * a[1]) * R(-Vector3.Right, ClavicleElevation * a[1]);
+        Quaternion clavicle = R(Vector3.Up, Protraction(a) - ClavicleRetraction * a[1]) * R(-Vector3.Right, ClavicleElevation * a[1]);
         // The humerus: its direction from the plane and elevation, its twist measured from the
         // comfortable way for the bent forearm to point with the arm there (see Comfortable).
         // So the twist is not added to by the plane angle the way it is in the model's Euler
@@ -1185,18 +1211,31 @@ public partial class JointLab : Node3D
         _arms[1].Depth = Depth(_arms[1], l, 0) + between;
     }
 
+    /// <summary>The last frame's length (seconds), for what is worked out as the arms are laid on.</summary>
+    private float _frameDt = 1f / 60;
+
     public override void _Process(double delta)
     {
+        _frameDt = Mathf.Min((float)delta, 0.05f);
+        // The sword arm from its own pose again: the two hands' meeting moved it for the last frame only.
+        RestoreSwordArm();
         Gamepad(Mathf.Min((float)delta, 0.05f));
+        UpdateDodge((float)delta);
         Tire((float)delta);
         Rumble((float)delta);
         UpdateTrigger((float)delta);
-        BuildContactMap(3);
+        // The shipped contact map describes the neutral torso, never a transient dodge.
+        if (_dodge == Vector3.Zero && DodgeOffset == Vector3.Zero) BuildContactMap(3);
         // Run independently of Settle's early exit: a foot must finish its step
         // even after the arm sliders have already reached their goals.
+        UpdateJump((float)delta);
         Walk((float)delta);
-        if (_footwork.Update(float.IsFinite(_twist) ? _twist : Bladed, (float)delta, _moved, _velocity,
-            _lunge * LungeFront, _lunge * LungeRear))
+        PlaceModel();
+        Vector3 support = DodgeOffset;
+        support.Y = 0;
+        bool feetChanged = _footwork.Update(float.IsFinite(_twist) ? _twist : Bladed, (float)delta, _moved + support * 0.65f, _velocity,
+            _lunge * LungeFront, _lunge * LungeRear, FeetAir(), Airborne);
+        if (feetChanged || _dodge != Vector3.Zero || DodgeOffset != Vector3.Zero || _jump != JumpPhase.None)
         {
             foreach (var entry in _legIdle)
                 _legs.Move(entry.Key, _skeleton.GetBoneGlobalPose(entry.Key) * entry.Value.AffineInverse());
@@ -1231,7 +1270,7 @@ public partial class JointLab : Node3D
             }
         }
         float trunk = Score(Mathf.Abs(_twist), TrunkRotation), neck = Score(Mathf.Abs(_twist), NeckRotation);
-        _trunkLabel.Text = $"Повёрнут на {_twist:0}° (правое плечо вперёд +), голова назад на {-_twist:0}°.\n"
+        _trunkLabel.Text = $"Повёрнут на {_twist:0}° ({(_leftHanded ? "левое" : "правое")} плечо вперёд +), голова назад на {-_twist:0}°.\n"
             + $"Нагрузка LUBA: корпус {trunk:0}, шея {neck:0}.";
         _pathLabel.Text = "Путь руки: " + (PlanningPose ? "расчёт — текущая поза удерживается" : SearchTimedOut
             ? "лимит поиска — прежняя поза сохранена" : PosePathBlocked
@@ -1243,6 +1282,7 @@ public partial class JointLab : Node3D
     /// <summary>Lays the angles onto the bones.</summary>
     private void Apply()
     {
+        HoldWithBothHands(_frameDt);
         foreach (var arm in _arms)
         {
             var p = Pose(arm, arm.Angles);
@@ -1265,6 +1305,7 @@ public partial class JointLab : Node3D
             _arms[0].Angles.CopyTo(_wrappedFor, 0);
         }
         PlaceCamera();
+        SyncMirror();
         PlaceSeeThrough();
     }
 
@@ -1553,9 +1594,11 @@ public partial class JointLab : Node3D
     // So too all through fine work (L1): its guard points the sword for the turn it began with.
     private float TrunkTwist() => float.IsFinite(_thrustTwist) ? _thrustTwist : float.IsFinite(_fineTwist) ? _fineTwist : TrunkTwist(_arms[0].Goal);
 
-    private static float TrunkTwist(float[] goal)
+    private float TrunkTwist(float[] goal)
     {
         float raised = Mathf.Clamp(goal[1] / 45, 0, 1);
+        if (_twoHanded)
+            return Mathf.Clamp(SquareOn + TwoHandShare * (goal[0] - TwoHandCentre) * raised, TwistMin, TwistMax);
         return Mathf.Clamp(Bladed + TwistShare * (goal[0] - 45) * raised, TwistMin, TwistMax);
     }
 
@@ -1572,16 +1615,23 @@ public partial class JointLab : Node3D
     /// </summary>
     private void Turn(float twist)
     {
-        if (twist == _twist)
+        if (twist == _twist && _appliedDodge == _dodge)
             return;
         _twist = twist;
+        if (_appliedDodge != _dodge) _leftTwist = float.NaN;
+        _appliedDodge = _dodge;
         float t = Mathf.DegToRad(twist);
+        Vector3 right = (_skeleton.GlobalTransform.Basis.Inverse() * _right).Normalized();
+        Vector3 forward = (_skeleton.GlobalTransform.Basis.Inverse() * _forward).Normalized();
+        Basis Lean(float share) => new Basis(_twistAxis, Mathf.DegToRad(_dodge.Y * share))
+            * new Basis(forward, Mathf.DegToRad(_dodge.Z * share))
+            * new Basis(right, Mathf.DegToRad(-_dodge.X * share));
         var turned = new Dictionary<int, Basis>
         {
-            [_spine1] = new Basis(_twistAxis, 0.4f * t) * _trunkIdle[_spine1].Basis,
-            [_spine2] = new Basis(_twistAxis, t) * _trunkIdle[_spine2].Basis,
-            [_neck] = new Basis(_twistAxis, 0.4f * t) * _trunkIdle[_neck].Basis,
-            [_head] = _trunkIdle[_head].Basis,
+            [_spine1] = Lean(0.4f) * new Basis(_twistAxis, 0.4f * t) * _trunkIdle[_spine1].Basis,
+            [_spine2] = Lean(1) * new Basis(_twistAxis, t) * _trunkIdle[_spine2].Basis,
+            [_neck] = Lean(0.7f) * new Basis(_twistAxis, 0.4f * t) * _trunkIdle[_neck].Basis,
+            [_head] = Lean(0.4f) * _trunkIdle[_head].Basis,
         };
         foreach (int bone in new[] { _spine1, _spine2, _neck, _head })
         {
@@ -1621,6 +1671,7 @@ public partial class JointLab : Node3D
         _camera.GlobalPosition = CameraChest + away * CameraDistance + Vector3.Up * Mathf.Lerp(0.15f, CameraHeight, behind)
             - side * (CameraSide * behind); // _right turned round with the camera points to its left: minus is over the right shoulder
         _camera.LookAt(CameraChest - away * (CameraLookAhead * behind) + Vector3.Up * Mathf.Lerp(-0.1f, 0.05f, behind));
+        MirrorCamera();
     }
 
     private void BuildWorld()
@@ -1674,6 +1725,7 @@ public partial class JointLab : Node3D
         var mirror = new Button { Text = "Левая = правая" };
         mirror.Pressed += () => { for (int d = 0; d < Dofs.Length; d++) _arms[1].Sliders[d].Value = _arms[0].Target[d]; };
         buttons.AddChild(mirror);
+        _copyButton = mirror;
         var rng = new RandomNumberGenerator();
         // A random pose from inside what is allowed: no joint at a limit it was clamped to,
         // nothing painful, and clear of the body, the other arm and the sword.
@@ -1725,9 +1777,11 @@ public partial class JointLab : Node3D
                     Show(which, Draw(which, _arms[1 - which].Target));
             };
             buttons.AddChild(button);
+            if (which >= 0)
+                _armButtons[which] = button;
         }
 
-        var toggles = new HBoxContainer();
+        var toggles = new VBoxContainer();
         list.AddChild(toggles);
         var collide = new CheckBox { Text = "Руки скользят по телу и друг по другу", ButtonPressed = true };
         collide.Toggled += on => { _collide = on; _settled = false; };
@@ -1735,6 +1789,8 @@ public partial class JointLab : Node3D
         var ghost = new CheckBox { Text = "Манекен растворяется вокруг меча", ButtonPressed = SeeThrough };
         ghost.Toggled += on => { SeeThrough = on; ApplySeeThrough(); };
         toggles.AddChild(ghost);
+        BuildHandToggle(toggles);
+        BuildTwoHandToggles(toggles);
                 var volumes = new CheckBox { Text = "Объёмы тела" };
         volumes.Toggled += on => _volumesShown.Visible = on;
         toggles.AddChild(volumes);
@@ -1745,21 +1801,24 @@ public partial class JointLab : Node3D
         left.AddChild(_trunkLabel);
         _pathLabel = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart, CustomMinimumSize = new Vector2(380, 46) };
         left.AddChild(_pathLabel);
-        AddSlider(list, "Камера", "", -180, 180, _orbit, value => { _orbit = value; PlaceCamera(); }, out _, out _);
+        AddSlider(list, "Камера", "", -180, 180, _orbit, value => { _orbit = value; PlaceCamera(); }, out _cameraSlider, out _);
+        BuildDodgePanel(list);
         for (int i = 0; i < 2; i++)
         {
             var arm = _arms[i];
             list.AddChild(new HSeparator());
-            list.AddChild(new Label { Text = i == 0 ? "ПРАВАЯ РУКА" : "ЛЕВАЯ РУКА" });
+            _armTitles[i] = new Label();
+            list.AddChild(_armTitles[i]);
             arm.LoadLabel = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart, CustomMinimumSize = new Vector2(300, 0) };
             list.AddChild(arm.LoadLabel);
             for (int d = 0; d < Dofs.Length; d++)
             {
                 int dof = d;
-                AddSlider(list, Dofs[d].Name, Dofs[d].Hint, Dofs[d].Min, Dofs[d].Max, Rest(i, d),
+                AddSlider(list, Dofs[d].Name, Dofs[d].Hint, Dofs[d].Min, GoalMax(i, d), Rest(i, d),
                     value => { arm.Target[dof] = value; arm.Touched[dof] = 0; }, out arm.Sliders[d], out arm.Values[d]);
             }
         }
+        NameArms();
     }
 
     private static void AddSlider(VBoxContainer list, string name, string hint, float min, float max, float value,
@@ -1799,5 +1858,8 @@ public partial class JointLab : Node3D
             + $"swordBody {SwordInBody(r, 0):0.000} swordArms {SwordInArms(r, l, 0):0.000} pain {Pain(_arms[0].Angles):0.0}/{Pain(_arms[1].Angles):0.0}";
     }
     public float Overlap() => Overlap(_arms[0].Angles, _arms[1].Angles);
-    public void Set(int arm, int dof, float degrees) => _arms[arm].Sliders[dof].Value = Mathf.Clamp(degrees, Dofs[dof].Min, Dofs[dof].Max);
+    public void Set(int arm, int dof, float degrees) => _arms[arm].Sliders[dof].Value = Mathf.Clamp(degrees, Dofs[dof].Min, GoalMax(arm, dof));
+
+    /// <summary>The most a goal may ask: the sword arm's plane is from the front, so it goes across as far as the trunk's turn adds (see SwingAcrossMax).</summary>
+    private static float GoalMax(int arm, int dof) => arm == 0 && dof == 0 ? SwingAcrossMax : Dofs[dof].Max;
 }

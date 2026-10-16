@@ -5,7 +5,9 @@ using Godot;
 /// camera sees it — up away from the camera, sideways sideways — at up to WalkSpeed, gathering
 /// and losing speed smoothly, in his stance and without turning to the way he goes, as a fencer
 /// moves. The feet step for it (JointLabFootwork); the body rides the steps; the camera follows
-/// where he is, not the ride.
+/// where he is, not the ride. "As the camera sees it" is as it saw it when the stick was pushed:
+/// turned mid-walk (R1 and the right stick), the camera turned the walk with it. Let go, the
+/// next walk takes the camera as it is then.
 /// </summary>
 public partial class JointLab
 {
@@ -16,6 +18,9 @@ public partial class JointLab
 
     private Node3D _model = null!;
     private Vector3 _modelStart, _moved, _velocity, _cameraMoved;
+    /// <summary>The floor's away-from-the-camera and right while the stick is pushed (unknown when it is not).</summary>
+    private Vector3 _walkForward, _walkRight;
+    private bool _walkFrameKnown;
     /// <summary>For tests: the stick as if pushed; once set, it stands in for the pad and the keyboard.</summary>
     public Vector2 WalkInput
     {
@@ -34,16 +39,25 @@ public partial class JointLab
     {
         dt = Mathf.Min(dt, 0.05f);
         Vector2 stick = _walkInput ?? WalkStickNow();
-        // Up the stick is away from the camera, right is the camera's right, on the floor.
-        Basis view = _camera.GlobalTransform.Basis;
-        Vector3 forward = -view.Z, right = view.X;
-        forward.Y = 0;
-        right.Y = 0;
-        forward = forward.Normalized();
-        right = right.Normalized();
-        Vector3 wanted = (right * stick.X - forward * stick.Y) * WalkSpeed;
-        if (wanted.Length() > WalkSpeed) wanted = wanted.Normalized() * WalkSpeed;
+        // Up the stick is away from the camera, right is the camera's right, on the floor: the
+        // camera as it was when the stick was pushed.
+        if (stick == Vector2.Zero)
+            _walkFrameKnown = false;
+        else if (!_walkFrameKnown)
+        {
+            Basis view = _camera.GlobalTransform.Basis;
+            _walkForward = new Vector3(-view.Z.X, 0, -view.Z.Z).Normalized();
+            _walkRight = new Vector3(view.X.X, 0, view.X.Z).Normalized();
+            _walkFrameKnown = true;
+        }
+        Vector3 forward = _walkForward, right = _walkRight;
+        // Running (L3), the stick's full tilt is RunSpeed.
+        float top = Mathf.Lerp(WalkSpeed, RunSpeed, _sprint);
+        Vector3 wanted = (right * stick.X - forward * stick.Y) * top;
+        if (wanted.Length() > top) wanted = wanted.Normalized() * top;
         float rate = wanted.LengthSquared() > _velocity.LengthSquared() ? WalkGather : WalkStop;
+        // In the air he keeps going as he left the ground, steering only a little.
+        if (_jump == JumpPhase.Air) rate *= AirControl;
         _velocity = _velocity.MoveToward(wanted, rate * dt);
         _moved += _velocity * dt;
         // The lunge: out fast after the thrust, back a little slower (the recovery).
@@ -62,11 +76,11 @@ public partial class JointLab
             (Input.IsPhysicalKeyPressed(Key.S) ? 1 : 0) - (Input.IsPhysicalKeyPressed(Key.W) ? 1 : 0));
         if (keys != Vector2.Zero)
             stick = keys.Normalized();
-        return stick;
+        return Mirrored(stick);
     }
 
     /// <summary>Where the fighter stands now, and the steps' ride on it.</summary>
-    private void PlaceModel() => _model.Position = _modelStart + _moved + BodyLunge() + _footwork.Bob;
+    private void PlaceModel() => _model.Position = _modelStart + _moved + BodyLunge() + _footwork.Bob + DodgeOffset + JumpOffset();
 
     /// <summary>How far the lunge carries the body (world): forward, and down into it.</summary>
     private Vector3 BodyLunge() => _lunge * LungeBody + Vector3.Down * (LungeSink * _lunge.Length() / LungeReach);

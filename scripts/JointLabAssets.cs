@@ -127,18 +127,20 @@ void fragment() {
         // The same pommel and tip the collisions use, in the world.
         Transform3D sword = SwordFrame(Pose(_arms[0], _arms[0].Angles));
         Transform3D toWorld = _skeleton.GlobalTransform * _turn;
-        Vector3 from = toWorld * SwordPoint(sword, PommelFrom), to = toWorld * SwordPoint(sword, BladeTo);
+        // Where it is seen (left-handed, in the mirror image) and by the camera that sees it.
+        Vector3 from = Shown(toWorld * SwordPoint(sword, PommelFrom)), to = Shown(toWorld * SwordPoint(sword, BladeTo));
+        Camera3D camera = ShownCamera;
         // Behind the camera a point does not project: no window then.
-        bool seen = !_camera.IsPositionBehind(from) && !_camera.IsPositionBehind(to);
+        bool seen = !camera.IsPositionBehind(from) && !camera.IsPositionBehind(to);
         Vector2 screen = GetViewport().GetVisibleRect().Size;
         foreach (var material in _dithered)
         {
             material.SetShaderParameter("active", seen);
             if (!seen) continue;
-            material.SetShaderParameter("sword_from", _camera.UnprojectPosition(from) / screen);
-            material.SetShaderParameter("sword_to", _camera.UnprojectPosition(to) / screen);
+            material.SetShaderParameter("sword_from", camera.UnprojectPosition(from) / screen);
+            material.SetShaderParameter("sword_to", camera.UnprojectPosition(to) / screen);
             material.SetShaderParameter("width", SeeThroughWidth);
-            Transform3D view = _camera.GlobalTransform.AffineInverse();
+            Transform3D view = camera.GlobalTransform.AffineInverse();
             material.SetShaderParameter("from_depth", -(view * from).Z);
             material.SetShaderParameter("to_depth", -(view * to).Z);
             material.SetShaderParameter("keep", SeeThroughKeep);
