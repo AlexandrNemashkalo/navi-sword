@@ -27,6 +27,9 @@ public sealed class JointLabFootwork
     /// <summary>How far the body sinks into the knees walking at full speed, metres: a fencer moves with them bent.</summary>
     private const float Crouch = 0.035f;
     private float _crouch;
+    private bool _lunged;
+    /// <summary>A lunge's step, seconds: quick, the foot shooting out.</summary>
+    private const float LungeStep = 0.16f;
     public bool Moving => _active >= 0;
     public Vector3 Foot(int i) => _feet[i].Origin;
 
@@ -97,8 +100,12 @@ public sealed class JointLabFootwork
     /// Steps the feet: `twistDegrees` the trunk's turn, `moved` how far the fighter has walked
     /// from where he started (world), `velocity` how fast he walks now.
     /// </summary>
-    public bool Update(float twistDegrees, float dt, Vector3 moved, Vector3 velocity)
+    public bool Update(float twistDegrees, float dt, Vector3 moved, Vector3 velocity, Vector3 front = default, Vector3 rear = default)
     {
+        // A lunge (front, rear: how far beyond the body's place each foot goes): the front foot
+        // steps out quickly, the rear one hardly moves. The right foot leads.
+        bool lunging = front.LengthSquared() > 0.0004f || _lunged;
+        _lunged = front.LengthSquared() > 0.0004f;
         dt = Mathf.Clamp(dt, 0, 0.05f);
         bool changed = Moving;
         _pause = Mathf.Max(0, _pause - dt);
@@ -115,11 +122,13 @@ public sealed class JointLabFootwork
         _crouch = Mathf.MoveToward(_crouch, walk, dt * 3);
         float stepTime = walking ? Mathf.Lerp(StepStanding, StepWalking, walk) : StepStanding;
         Vector3 ahead = moved + velocity * stepTime;
-        Transform3D Target(int i) => new(turn * _rest[i].Basis, centre + ahead + turn * (_rest[i].Origin - centre));
-        if (_active < 0 && (_pause <= 0 || walking))
+        Vector3 frontExtra = front, rearExtra = rear;
+        Transform3D Target(int i) => new(turn * _rest[i].Basis, centre + ahead + (i == 1 ? frontExtra : rearExtra) + turn * (_rest[i].Origin - centre));
+        if (lunging) stepTime = LungeStep;
+        if (_active < 0 && (_pause <= 0 || walking || lunging))
         {
             int best = -1;
-            float worst = walking ? 0.02f : 0.055f;
+            float worst = walking ? 0.02f : lunging ? 0.04f : 0.055f;
             for (int i = 0; i < 2; i++)
             {
                 var target = Target(i);
@@ -140,15 +149,15 @@ public sealed class JointLabFootwork
                 _to = Target(best);
                 _time = 0;
                 _stepTime = stepTime;
-                _lift = Mathf.Lerp(0.05f, 0.085f, walk);
+                _lift = lunging ? 0.05f : Mathf.Lerp(0.05f, 0.085f, walk);
                 changed = true;
             }
         }
         if (_active >= 0)
         {
             // Under way, the step's end follows the target (the fighter keeps walking).
-            if (walking)
-                _to = _to.InterpolateWith(Target(_active), Mathf.Clamp(dt * 8, 0, 1));
+            if (walking || lunging)
+                _to = _to.InterpolateWith(Target(_active), Mathf.Clamp(dt * (lunging ? 20 : 8), 0, 1));
             _time = Mathf.Min(1, _time + dt / _stepTime);
             float blend = _time * _time * (3 - 2 * _time);
             _feet[_active] = _from.InterpolateWith(_to, blend);

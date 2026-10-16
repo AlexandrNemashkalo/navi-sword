@@ -1,7 +1,8 @@
 extends SceneTree
-# The thrust: with L1 held, R2 drives the sword forward along its own line — the hand ahead
-# along the blade, hardly off it, the blade keeping its direction — and back as R2 is let go.
-# Without L1, R2 is the cut's end as before: the elbow straightens.
+# Fine work's thrust. L1 down: the sword comes round to point forward, at the opponent (not up).
+# R2: the sword drives forward along its own line, the arm reaching and the body lunging after
+# it — the front foot steps out, the rear one hardly moves — and back as R2 is let go (the front
+# foot steps back). Without L1, R2 is the cut's end: the elbow straightens.
 # Run: godot --headless --path . --script res://tests/joint_thrust_test.gd
 
 func _initialize():
@@ -18,35 +19,46 @@ func run():
 	lab.CentrePad()
 	for i in 120:
 		step(lab, 0.0, false)
-	for i in 30:
-		step(lab, 0.0, true)
 	var sword = lab.Sword
+	var camera = lab.find_children("*", "Camera3D", true, false)[0]
+	var up_before = sword.global_transform.basis.y.normalized().y
+	for i in 45:
+		step(lab, 0.0, true)
+	# Forward: the way the camera looks (it stands behind him), on the floor.
+	var ahead = -camera.global_transform.basis.z
+	ahead.y = 0
+	ahead = ahead.normalized()
+	var line = sword.global_transform.basis.y.normalized()
+	var flat = Vector3(line.x, 0, line.z).normalized()
+	var points_ahead = rad_to_deg(flat.angle_to(ahead))
+	var points_up = rad_to_deg(asin(clamp(line.y, -1, 1)))
 	var start = sword.global_transform
-	var line = start.basis.y.normalized()
-	var elbow_before = lab.Angle(0, 3)
+	var feet = [lab.FootPosition(0), lab.FootPosition(1)]
 	for f in 60:
-		step(lab, min(1.0, f / 15.0), true)
-	var asked = lab.ThrustReached
+		step(lab, min(1.0, f / 10.0), true)
 	var now = sword.global_transform
 	var moved = now.origin - start.origin
 	var along = moved.dot(line)
 	var off = (moved - line * along).length()
 	var turned = rad_to_deg(line.angle_to(now.basis.y.normalized()))
-	var elbow_thrust = lab.Angle(0, 3)
-	for f in 60:
+	var lunge = lab.Lunge.length()
+	var front = lab.FootPosition(1).distance_to(feet[1])
+	var rear = lab.FootPosition(0).distance_to(feet[0])
+	for f in 90:
 		step(lab, 0.0, true)
 	var back = sword.global_transform.origin.distance_to(start.origin)
-	# Without L1: the elbow straightens.
+	var recovered = lab.Lunge.length()
 	for i in 30:
 		step(lab, 0.0, false)
 	for f in 60:
 		step(lab, min(1.0, f / 15.0), false)
 	var elbow_cut = lab.Angle(0, 3)
-	print("thrust: sword %.2f m along its line, %.2f m off it, turned %.1f°, elbow %.0f° -> %.0f° (asked %.2f along, %.2f off); let go: %.2f m from start; cut: elbow %.0f°" % [
-		along, off, turned, elbow_before, elbow_thrust, asked.x, asked.y, back, elbow_cut])
-	if along > 0.2 and off < 0.04 and turned < 5 and elbow_thrust < elbow_before - 15 and back < 0.03 and elbow_cut < 5:
-		print("PASS thrust: L1 + R2 drives the sword along its line; R2 alone straightens the elbow")
+	print("guard: point %.0f° off ahead, %.0f° up (was %.2f of the way up); thrust: sword %.2f m along its line, %.2f m off, turned %.1f°, body lunged %.2f m, front foot %.2f m, rear %.2f m; let go: sword %.2f m from start, lunge %.2f; cut: elbow %.0f°" % [
+		points_ahead, points_up, up_before, along, off, turned, lunge, front, rear, back, recovered, elbow_cut])
+	if points_ahead < 25 and points_up < 10 and along > 0.4 and off < 0.08 and turned < 8 and lunge > 0.15 \
+		and front > 0.3 and rear < 0.12 and back < 0.05 and recovered < 0.02 and elbow_cut < 5:
+		print("PASS thrust: forward guard, along the line with a lunge, recovery; R2 alone straightens the elbow")
 		quit()
 	else:
-		push_error("The thrust does not drive the sword along its line")
+		push_error("The thrust or its guard is off")
 		quit(1)

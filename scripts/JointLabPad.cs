@@ -34,6 +34,8 @@ public partial class JointLab
     private float _elbowRest = GuardElbow, _turnRest;
     /// <summary>The arm and the pad when L1 went down.</summary>
     private readonly float[] _held = new float[7];
+    private float[] _guardFrom = new float[7], _guardTo = new float[7];
+    private float _guardBlend = 1;
     private Vector3 _padHeld;
     private Label _padStatus = null!, _padValues = null!, _padHelp = null!, _rumbleLabel = null!;
 
@@ -244,6 +246,10 @@ public partial class JointLab
         {
             t.CopyTo(_held, 0);
             _padHeld = pad;
+            // Into the thrust's guard: the point comes round to the opponent (JointLabThrust).
+            _guardFrom = (float[])_held.Clone();
+            _guardTo = PointForward(_held);
+            _guardBlend = 0;
         }
         else if (!fine && _fine)
         {
@@ -268,6 +274,13 @@ public partial class JointLab
         else
         {
             p = pad - _padHeld;
+            if (_guardBlend < 1)
+            {
+                _guardBlend = Mathf.Min(1, _guardBlend + dt / GuardTime);
+                float blend = Mathf.SmoothStep(0, 1, _guardBlend);
+                for (int d = 0; d < Dofs.Length; d++)
+                    _held[d] = Mathf.Lerp(_guardFrom[d], _guardTo[d], blend);
+            }
             // The shoulder follows a little (FineShoulder of what it would out of fine work): held
             // dead still it looked frozen, the forearm moving on a stuck arm. From where it was
             // held, so the thrust below moves it from there, not from its last.

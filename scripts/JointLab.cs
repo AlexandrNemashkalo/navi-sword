@@ -1195,7 +1195,8 @@ public partial class JointLab : Node3D
         // Run independently of Settle's early exit: a foot must finish its step
         // even after the arm sliders have already reached their goals.
         Walk((float)delta);
-        if (_footwork.Update(float.IsFinite(_twist) ? _twist : Bladed, (float)delta, _moved, _velocity))
+        if (_footwork.Update(float.IsFinite(_twist) ? _twist : Bladed, (float)delta, _moved, _velocity,
+            _lunge * LungeFront, _lunge * LungeRear))
         {
             foreach (var entry in _legIdle)
                 _legs.Move(entry.Key, _skeleton.GetBoneGlobalPose(entry.Key) * entry.Value.AffineInverse());

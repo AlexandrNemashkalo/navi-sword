@@ -46,7 +46,10 @@ public partial class JointLab
         float rate = wanted.LengthSquared() > _velocity.LengthSquared() ? WalkGather : WalkStop;
         _velocity = _velocity.MoveToward(wanted, rate * dt);
         _moved += _velocity * dt;
-        _cameraMoved = _cameraMoved.Lerp(_moved, 1 - Mathf.Exp(-WalkFollow * dt));
+        // The lunge: out fast after the thrust, back a little slower (the recovery).
+        Vector3 lunge = _lungeWay * (LungeReach * _lungeWanted);
+        _lunge = _lunge.Lerp(lunge, 1 - Mathf.Exp(-(lunge.LengthSquared() > _lunge.LengthSquared() ? 14 : 7) * dt));
+        _cameraMoved = _cameraMoved.Lerp(_moved + _lunge * 0.5f, 1 - Mathf.Exp(-WalkFollow * dt));
     }
 
     /// <summary>The left stick past its dead zone, or W A S D.</summary>
@@ -63,7 +66,19 @@ public partial class JointLab
     }
 
     /// <summary>Where the fighter stands now, and the steps' ride on it.</summary>
-    private void PlaceModel() => _model.Position = _modelStart + _moved + _footwork.Bob;
+    private void PlaceModel() => _model.Position = _modelStart + _moved + BodyLunge() + _footwork.Bob;
+
+    /// <summary>How far the lunge carries the body (world): forward, and down into it.</summary>
+    private Vector3 BodyLunge() => _lunge * LungeBody + Vector3.Down * (LungeSink * _lunge.Length() / LungeReach);
+
+    /// <summary>
+    /// In a lunge the body goes this share of it forward, and sinks this far at the deepest (m);
+    /// the front foot goes LungeFront of it, the rear LungeRear.
+    /// </summary>
+    private const float LungeBody = 0.5f, LungeSink = 0.07f, LungeFront = 1.1f, LungeRear = 0.1f;
+    private Vector3 _lunge;
+    /// <summary>For tests: how far the lunge has carried the body.</summary>
+    public Vector3 Lunge => _lunge * LungeBody;
 
     /// <summary>A floor big enough to walk on, in metre squares (faint lines), so the walking shows.</summary>
     private static MeshInstance3D Floor()
