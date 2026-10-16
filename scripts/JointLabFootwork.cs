@@ -14,6 +14,24 @@ public sealed class JointLabFootwork
     public bool Moving => _active >= 0;
     public Vector3 Foot(int i) => _feet[i].Origin;
 
+    /// <summary>
+    /// How far the stance has turned from where it started, degrees about the vertical: the
+    /// feet's turn, averaged. The camera turns with it, so the fighter keeps his side to it.
+    /// </summary>
+    public float Heading
+    {
+        get
+        {
+            float sum = 0;
+            for (int i = 0; i < 2; i++)
+            {
+                Vector3 way = _feet[i].Basis * _rest[i].Basis.Inverse() * Vector3.Forward;
+                sum += Mathf.Atan2(-way.X, -way.Z);
+            }
+            return Mathf.RadToDeg(sum / 2);
+        }
+    }
+
     public JointLabFootwork(Skeleton3D skeleton)
     {
         _s = skeleton;

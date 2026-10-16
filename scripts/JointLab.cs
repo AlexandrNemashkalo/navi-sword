@@ -54,7 +54,15 @@ public partial class JointLab : Node3D
     private readonly Arm[] _arms = { new(), new() };
     private Camera3D _camera = null!;
     private Vector3 _chest, _forward, _right;
-    private float _orbit = 25;
+    /// <summary>
+    /// Where the camera looks from by default, degrees round the fighter from his front (0 in
+    /// front, −160 behind his right shoulder). Set in the scene; the "Камера" slider moves it.
+    /// </summary>
+    [Export(PropertyHint.Range, "-180,180,1")]
+    public float CameraOrbit { get; set; } = -160;
+    private float _orbit;
+    /// <summary>The stance's turn as the camera follows it (eased after the steps), degrees.</summary>
+    private float _cameraHeading;
     private BodyVolumes _body = null!;
     /// <summary>
     /// The trunk's turn, degrees: positive brings the sword (right) shoulder forward. Fighting
@@ -118,6 +126,7 @@ public partial class JointLab : Node3D
 
     public override void _Ready()
     {
+        _orbit = CameraOrbit;
         BuildWorld();
         var model = GD.Load<PackedScene>("res://assets/mannequiny/mannequiny.glb").Instantiate<Node3D>();
         model.Rotation = new Vector3(0, Mathf.Pi, 0);
@@ -1140,6 +1149,7 @@ public partial class JointLab : Node3D
             if (_volumesShown != null) PlaceVolumes();
         }
         AdvancePlannedPose((float)delta);
+        _cameraHeading += (_footwork.Heading - _cameraHeading) * (1 - Mathf.Exp(-CameraFollow * (float)delta));
         // Search may have evaluated a very different pose. Diagnostics describe
         // the displayed hands, never the last hidden candidate.
         ArmPose displayedRight = Pose(_arms[0], _arms[0].Angles), displayedLeft = Pose(_arms[1], _arms[1].Angles);
@@ -1526,6 +1536,9 @@ public partial class JointLab : Node3D
         _settled = false;
     }
 
+    /// <summary>How fast the camera follows the stance's turn (1/seconds).</summary>
+    private const float CameraFollow = 3;
+
     /// <summary>For screenshots: leave the camera where it was put.</summary>
     public bool FreeCamera { get; set; }
 
@@ -1533,7 +1546,9 @@ public partial class JointLab : Node3D
     {
         if (FreeCamera)
             return;
-        Vector3 offset = new Basis(Vector3.Up, Mathf.DegToRad(_orbit)) * (_forward * 2.3f);
+        // Round with the stance: the steps turn the whole fighter, and the camera, standing
+        // still, ended up looking at his back. Not with the trunk's turn, which every cut moves.
+        Vector3 offset = new Basis(Vector3.Up, Mathf.DegToRad(_orbit + _cameraHeading)) * (_forward * 2.3f);
         _camera.GlobalPosition = _chest + offset + Vector3.Up * 0.15f;
         _camera.LookAt(_chest - Vector3.Up * 0.1f);
     }
