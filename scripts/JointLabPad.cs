@@ -36,6 +36,8 @@ public partial class JointLab
     private readonly float[] _held = new float[7];
     private float[] _guardFrom = new float[7], _guardTo = new float[7];
     private float _guardBlend = 1;
+    /// <summary>The trunk's turn held through fine work (NaN: not in it).</summary>
+    private float _fineTwist = float.NaN;
     private Vector3 _padHeld;
     private Label _padStatus = null!, _padValues = null!, _padHelp = null!, _rumbleLabel = null!;
 
@@ -246,13 +248,16 @@ public partial class JointLab
         {
             t.CopyTo(_held, 0);
             _padHeld = pad;
-            // Into the thrust's guard: the point comes round to the opponent (JointLabThrust).
+            // Into the thrust's guard: the point comes round to the opponent (JointLabThrust),
+            // the trunk holding its turn meanwhile.
+            _fineTwist = _twist;
             _guardFrom = (float[])_held.Clone();
             _guardTo = PointForward(_held);
             _guardBlend = 0;
         }
         else if (!fine && _fine)
         {
+            _fineTwist = float.NaN;
             // Back to the shoulder: the pad's present attitude stands for where the arm is now,
             // and the stick's rest for where the elbow and forearm are now.
             _padCentre = pad - new Vector3((t[1] - GuardElevation) / ShoulderGain, SwingTurn(t[0]), -t[2] / TwistGain);

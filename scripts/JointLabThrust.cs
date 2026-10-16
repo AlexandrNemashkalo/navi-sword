@@ -4,8 +4,8 @@ using Godot;
 /// Fine work's thrust (L1 held), as a fencer makes it.
 ///
 /// The guard: as L1 goes down the arm comes, over GuardTime (0.35 s), to point the sword forward — at
-/// the opponent's chest, a little down — the hand staying where it was, the wrist and forearm
-/// doing most of it and the shoulder helping; out of fine work the sword stands up, as a cut
+/// the opponent's face, a little up — the shoulder and elbow doing it, the forearm and wrist
+/// left as they were; out of fine work the sword stands up, as a cut
 /// needs it.
 ///
 /// The thrust, R2: the hand goes forward along the blade (up to ThrustReach), the elbow opening
@@ -24,8 +24,13 @@ public partial class JointLab
     private const float ThrustReach = 0.35f, LungeReach = 0.7f;
     /// <summary>The blade's direction against the hand's place (metres per unit of direction), and the pull back to the held pose (per degree).</summary>
     private const float ThrustAim = 1.0f, ThrustStay = 0.0006f;
-    /// <summary>How long the arm takes to come to the thrust's guard, seconds; how far down from level the point aims, degrees.</summary>
-    private const float GuardTime = 0.35f, GuardDip = 8;
+    /// <summary>How long the arm takes to come to the thrust's guard, seconds; how far down from level the point aims, degrees (up, negative).</summary>
+    private const float GuardTime = 0.35f, GuardDip = -5;
+    /// <summary>How far the point dips over the whole thrust, degrees.</summary>
+    private const float ThrustDip = 20;
+    /// <summary>Where the guard holds the hand: this far in front of the shoulder and below it, metres.</summary>
+    private const float ThrustGuardElbow = 75;
+    private const float GuardAhead = 0.3f, GuardBelow = 0.2f;
 
     private readonly float[] _thrust = new float[7], _thrustBase = new float[7], _guardArm = new float[7];
     private readonly float[] _armResidual = new float[13], _armTryResidual = new float[13], _armRhs = new float[7], _armStep = new float[7], _armGram = new float[49];
@@ -33,12 +38,16 @@ public partial class JointLab
     private float[] _armStayWeight = EvenStay;
     private float _armHandWeight = 1;
     private static readonly float[] EvenStay = { 1, 1, 1, 1, 1, 1, 1 };
+    /// <summary>The thrust, as the guard: the shoulder and elbow drive it, the forearm and the wrist's bend stay.</summary>
+    private static readonly float[] ThrustStayWeights = { 1, 1, 1, 1, 30, 60, 4 };
     /// <summary>
-    /// The guard keeps the elbow as it was, bent (the thrust's reach is in it: straightened to
-    /// point the sword, it left the arm nothing to thrust with), and the shoulder near; the
-    /// forearm and wrist point the blade.
+    /// The guard points the blade with the shoulder and the elbow; the forearm and wrist stay as
+    /// they were (bent to aim the point, the wrist looked broken). The elbow is drawn to
+    /// ThrustGuardElbow, bent: the thrust's reach is in it. The handshake grip holds the blade up
+    /// from the forearm's line, so with the wrist easy the point stands a little up (GuardDip),
+    /// at the opponent's face — and dips into the thrust.
     /// </summary>
-    private static readonly float[] GuardStay = { 4, 4, 1, 40, 0.5f, 0.5f, 0.5f };
+    private static readonly float[] GuardStay = { 0.3f, 0.3f, 0.3f, 3, 30, 60, 4 };
     private bool _thrustKnown;
     /// <summary>The trunk's turn as the thrust began (NaN: not thrusting).</summary>
     private float _thrustTwist = float.NaN;
@@ -85,8 +94,14 @@ public partial class JointLab
         // The point on the line, in the world: the lunge carries the body (and the shoulder) part
         // of the way, and sinks it; the arm makes up the rest, so the sword stays on its line.
         Vector3 body = WorldToArmVector(BodyLunge() - _thrustBodyAtStart);
-        Vector3 target = hand0 + blade0 * ((ThrustReach + LungeReach * LungeBody * Mathf.Abs(_lungeWay.Dot(ArmToWorld(blade0)))) * pull) - body;
-        SolveArm(_thrust, _thrustBase, target, blade0, ThrustAim, 10);
+        // The point dips as the thrust goes in (ThrustDip at full), the hand going a little down
+        // with it: a thrust at the body, not a rod pushed level.
+        Vector3 down = WorldToArm(Vector3.Down);
+        Vector3 across = blade0.Cross(down);
+        Vector3 bladeTo = across.LengthSquared() > 1e-6f ? blade0.Rotated(across.Normalized(), Mathf.DegToRad(ThrustDip * pull)) : blade0;
+        Vector3 path = across.LengthSquared() > 1e-6f ? blade0.Rotated(across.Normalized(), Mathf.DegToRad(ThrustDip * pull / 2)) : blade0;
+        Vector3 target = hand0 + path * ((ThrustReach + LungeReach * LungeBody * Mathf.Abs(_lungeWay.Dot(ArmToWorld(blade0)))) * pull) - body;
+        SolveArm(_thrust, _thrustBase, target, bladeTo, ThrustAim, 10, ThrustStayWeights);
         var (hand, _) = HandAndBlade(_thrust);
         Vector3 off = hand + body - hand0;
         float along = off.Dot(blade0);
@@ -105,12 +120,17 @@ public partial class JointLab
         _thrustBase[0] = FromChest(0, held[0]);
         Anatomy(_thrustBase);
         System.Array.Copy(_thrustBase, _guardArm, 7);
-        var (hand, _) = HandAndBlade(_thrustBase);
         // Forward as the fighter faces (his stance's turn), a little down, in the arm's own frame.
-        Vector3 facing = new Basis(Vector3.Up, Mathf.DegToRad(_footwork.Heading)) * _forward;
-        facing = (facing * Mathf.Cos(Mathf.DegToRad(GuardDip)) + Vector3.Down * Mathf.Sin(Mathf.DegToRad(GuardDip))).Normalized();
+        Vector3 ahead = new Basis(Vector3.Up, Mathf.DegToRad(_footwork.Heading)) * _forward;
+        Vector3 facing = (ahead * Mathf.Cos(Mathf.DegToRad(GuardDip)) + Vector3.Down * Mathf.Sin(Mathf.DegToRad(GuardDip))).Normalized();
         Vector3 point = WorldToArm(facing);
-        // The blade's way counts as much as the hand's place: it is what the guard is for.
+        // The hand before the body, between belly and chest (GuardAhead in front of the shoulder,
+        // GuardBelow under it): the upper arm forward and down, the elbow bent, the forearm
+        // level, the blade going on along it. Without a place for it, the shoulder dropped the
+        // arm to the hip, the cheapest way to turn the blade forward.
+        Vector3 shoulder = Pose(_arms[0], _thrustBase).Shoulder;
+        Vector3 hand = shoulder + WorldToArmVector(ahead * GuardAhead + Vector3.Down * GuardBelow);
+        _thrustBase[3] = ThrustGuardElbow;
         SolveArm(_guardArm, _thrustBase, hand, point, 4, 40, GuardStay);
         GuardMiss = Mathf.RadToDeg(HandAndBlade(_guardArm).Blade.AngleTo(point));
         var guard = (float[])_guardArm.Clone();

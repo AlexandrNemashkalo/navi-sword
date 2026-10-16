@@ -1550,7 +1550,8 @@ public partial class JointLab : Node3D
     /// </summary>
     // Thrusting, the trunk holds the turn it had: following the plane the thrust changes, it
     // turned the shoulders and took the sword off its line.
-    private float TrunkTwist() => float.IsFinite(_thrustTwist) ? _thrustTwist : TrunkTwist(_arms[0].Goal);
+    // So too all through fine work (L1): its guard points the sword for the turn it began with.
+    private float TrunkTwist() => float.IsFinite(_thrustTwist) ? _thrustTwist : float.IsFinite(_fineTwist) ? _fineTwist : TrunkTwist(_arms[0].Goal);
 
     private static float TrunkTwist(float[] goal)
     {
