@@ -16,7 +16,8 @@ using Godot;
 /// Tired, the arm sounds heavier: the swish lower.
 ///
 /// Played through Godot's audio; with the pad on USB its speaker is a sound device of its own,
-/// and the sound can go there (the checkbox; the whole game's sound goes with it).
+/// and the sound can go there (the checkbox; the whole game's sound goes with it). The speaker
+/// itself is silent on a PC until turned on with the pad's output report (DualSenseTriggers).
 /// </summary>
 public partial class JointLab
 {
@@ -38,6 +39,7 @@ public partial class JointLab
     private float _r2, _r2Before;
     private bool _r2Down, _snapped;
     private Label _soundLabel = null!;
+    private bool _soundToPad;
 
     /// <summary>For tests: the tip's speed, the swish's loudness (0–1), and how many cracks and snaps have sounded.</summary>
     public float TipSpeed => _tipSpeed;
@@ -65,7 +67,16 @@ public partial class JointLab
         sound.Toggled += on => SwordSound = on;
         list.AddChild(sound);
         var pad = new CheckBox { Text = "Звук в динамик геймпада (по USB)" };
-        pad.Toggled += on => _soundLabel.Text = SoundToPad(on);
+        pad.Toggled += on =>
+        {
+            _soundToPad = on;
+            _soundLabel.Text = SoundToPad(on);
+            // The pad's speaker is silent until it is turned on, over HID like the triggers.
+            if (_triggers.Connect())
+                _triggers.Speaker(on);
+            else if (on)
+                _soundLabel.Text += " Динамик не включён: " + _triggers.Status + ".";
+        };
         list.AddChild(pad);
         _soundLabel = new Label { CustomMinimumSize = new Vector2(380, 23), AutowrapMode = TextServer.AutowrapMode.WordSmart };
         list.AddChild(_soundLabel);

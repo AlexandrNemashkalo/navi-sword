@@ -114,16 +114,50 @@ public sealed class DualSenseTriggers : IDisposable
     {
         if (_stream == null)
             return;
-        var report = new byte[_length];
-        report[0] = (byte)(_bluetooth ? 0x31 : 0x02);
-        if (_bluetooth)
-            report[1] = 0x02;
+        var report = NewReport();
         int data = Data;
         report[data + ValidFlags0] = (byte)(at == RightTrigger || at2 == RightTrigger ? RightTriggerValid : 0);
         report[data + ValidFlags0] |= (byte)(at == LeftTrigger || at2 == LeftTrigger ? LeftTriggerValid : 0);
         Array.Copy(effect, 0, report, data + at, effect.Length);
         if (effect2 != null)
             Array.Copy(effect2, 0, report, data + at2, effect2.Length);
+        Write(report);
+    }
+
+    private const int SpeakerVolume = 5, AudioControl = 7;
+    private const byte SpeakerVolumeValid = 0x20, AudioControlValid = 0x80;
+    /// <summary>The audio control byte's output path (bits 4–5): 3, the pad's own speaker.</summary>
+    private const byte SpeakerPath = 0x30;
+
+    /// <summary>
+    /// The pad's speaker on, at a volume of 0–1, or off. On a PC it is silent out of the box:
+    /// Windows plays to it as to any sound device, but its volume is the pad's own, set (as the
+    /// console does) by the same output report as the triggers.
+    /// </summary>
+    public void Speaker(bool on, float volume = 1)
+    {
+        if (_stream == null)
+            return;
+        var report = NewReport();
+        int data = Data;
+        report[data + ValidFlags0] = SpeakerVolumeValid | AudioControlValid;
+        // Sony's own range for the speaker is 0x3D–0x64; under it, off.
+        report[data + SpeakerVolume] = on ? (byte)(0x3D + Math.Clamp(volume, 0, 1) * (0x64 - 0x3D)) : (byte)0;
+        report[data + AudioControl] = on ? SpeakerPath : (byte)0;
+        Write(report);
+    }
+
+    private byte[] NewReport()
+    {
+        var report = new byte[_length];
+        report[0] = (byte)(_bluetooth ? 0x31 : 0x02);
+        if (_bluetooth)
+            report[1] = 0x02;
+        return report;
+    }
+
+    private void Write(byte[] report)
+    {
         if (_bluetooth)
         {
             uint crc = Crc32(report, BluetoothLength - 4);
@@ -137,7 +171,7 @@ public sealed class DualSenseTriggers : IDisposable
             _last = report;
         }
         // Off the main thread: a write over Bluetooth can take a few milliseconds.
-        var stream = _stream;
+        var stream = _stream!;
         Task.Run(() =>
         {
             try { lock (_lock) stream.Write(report); }

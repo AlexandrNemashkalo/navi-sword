@@ -44,7 +44,8 @@ public partial class JointLab
             {
                 _triggerRetry = 2;
                 _triggerStrength = -1;
-                _triggers.Connect();
+                if (_triggers.Connect() && _soundToPad)
+                    _triggers.Speaker(true);
             }
         }
         if (_triggers.Connected && AdaptiveTrigger)
@@ -63,6 +64,16 @@ public partial class JointLab
     }
 
     public override void _ExitTree() => _triggers.Dispose();
+
+    /// <summary>For tests on a real pad: send the sound to its speaker and turn the speaker on; says how it went.</summary>
+    public string ProbeSpeaker()
+    {
+        string device = SoundToPad(true);
+        bool connected = _triggers.Connect();
+        if (connected)
+            _triggers.Speaker(true);
+        return $"{device} speaker on: {connected}, {_triggers.Status}";
+    }
 
     /// <summary>For tests on a real pad: connect, set the strongest click, and say how it went.</summary>
     public string ProbeTrigger()
