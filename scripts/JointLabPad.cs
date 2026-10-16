@@ -96,6 +96,14 @@ public partial class JointLab
         var rumble = new CheckBox { Text = "Вибрация по нагрузке позы (с категории II)", ButtonPressed = true };
         rumble.Toggled += on => LoadRumble = on;
         list.AddChild(rumble);
+        var strengthRow = new HBoxContainer();
+        list.AddChild(strengthRow);
+        var strengthValue = new Label { Text = $"{100 * RumbleStrength:0}%", CustomMinimumSize = new Vector2(48, 0) };
+        strengthRow.AddChild(new Label { Text = "Сила вибрации" });
+        var strength = new HSlider { MinValue = 0, MaxValue = 100, Step = 1, Value = 100 * RumbleStrength, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+        strength.ValueChanged += v => { RumbleStrength = (float)v / 100; strengthValue.Text = $"{v:0}%"; };
+        strengthRow.AddChild(strength);
+        strengthRow.AddChild(strengthValue);
         _rumbleLabel = Line(1);
         BuildStaminaPanel(list);
         _mapLabel = Line(1);
@@ -286,6 +294,8 @@ public partial class JointLab
     /// <summary>The pad vibrates with the sword arm's postural load (unticked: not at all).</summary>
     public bool LoadRumble { get; set; } = true;
     private float _rumbleSent = -1, _rumbleFor;
+    /// <summary>The motors' strength at the heaviest load, 0–1 (the slider in the pad panel).</summary>
+    public float RumbleStrength { get; set; } = 0.3f;
     /// <summary>The load at which the pad starts to vibrate, points (in category II, which begins at 5).</summary>
     private const float RumbleFrom = 7;
     /// <summary>
@@ -331,8 +341,10 @@ public partial class JointLab
         float held = Mathf.SmoothStep(0, 1, _heldLoaded / RumbleHold);
         // Tired, the same pose is felt more: up to half as many points again, exhausted.
         var (weak, strong) = LoadRumble ? RumbleFor(load * (1 + 0.5f * Fatigue)) : (0f, 0f);
-        weak *= held;
-        strong *= held;
+        // Felt, not shaken: softened at the low end (the power 1.5) and scaled by the strength
+        // slider — at full scale even the light end of category II was too strong.
+        weak = RumbleStrength * Mathf.Pow(weak * held, 1.5f);
+        strong = RumbleStrength * Mathf.Pow(strong * held, 1.5f);
         _rumbleLabel.Text = LoadRumble ? $"Вибрация по нагрузке: {100 * weak:0}% (тяжёлый мотор {100 * strong:0}%)" : "Вибрация по нагрузке: выключена";
         if (_device < 0)
             return;
@@ -345,7 +357,7 @@ public partial class JointLab
             return;
         }
         // Renewed before it runs out, or at once when it has changed noticeably.
-        if (_rumbleFor > 0 && Mathf.Abs(weak - _rumbleSent) < 0.03f)
+        if (_rumbleFor > 0 && Mathf.Abs(weak - _rumbleSent) < 0.01f)
             return;
         Input.StartJoyVibration(_device, weak, strong, 0.25f);
         _rumbleSent = weak;
