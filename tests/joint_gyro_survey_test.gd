@@ -1,4 +1,5 @@
 extends SceneTree
+# (The pad's turns are as at its former even gain; EvenSwing keeps the poses this test means.)
 # Plays sixteen random smooth gyro motions, four seconds each, all over the sword arm's range,
 # with a little sensor noise and the elbow on the stick, and checks the solver as a whole:
 # the full solve is rare (free moves take the straight step, contacts the cheap slide), the
@@ -38,7 +39,7 @@ func run():
 		var stick_of = func(t): return Vector2(0, clamp(se.call(t), -1, 1))
 		lab.CentrePad()
 		for i in 45:
-			lab.DrivePad(pad_of.call(0.0), stick_of.call(0.0), 0.0, false)
+			lab.DrivePad(lab.EvenSwing(pad_of.call(0.0)), stick_of.call(0.0), 0.0, false)
 			lab._Process(1.0 / 60)
 		lab.ResetSolverStats()
 		var noise = RandomNumberGenerator.new()
@@ -55,7 +56,7 @@ func run():
 		for f in 240:
 			var t = f / 60.0
 			var p = pad_of.call(t) + Vector3(noise.randf_range(-0.3, 0.3), noise.randf_range(-0.3, 0.3), noise.randf_range(-0.3, 0.3))
-			lab.DrivePad(p, stick_of.call(t), 0.0, false)
+			lab.DrivePad(lab.EvenSwing(p), stick_of.call(t), 0.0, false)
 			var start = Time.get_ticks_usec()
 			lab._Process(1.0 / 60)
 			times.append((Time.get_ticks_usec() - start) / 1000.0)

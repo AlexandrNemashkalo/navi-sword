@@ -1,4 +1,5 @@
 extends SceneTree
+# (The pad's turns are as at its former even gain; EvenSwing keeps the poses this test means.)
 # Plays the gyro where the sword arm runs into the body — across the chest with the elbow bent,
 # the forearm rolled into the belly, wound up behind the back — with a little sensor noise, and
 # counts how often the blade's tip and the hand reverse their motion. Pressed against the body
@@ -21,7 +22,7 @@ func trial(lab, label, pad_of, stick):
 	rng.seed = 4
 	lab.CentrePad()
 	for i in 60:
-		lab.DrivePad(pad_of.call(0), stick, 0.0, false)
+		lab.DrivePad(lab.EvenSwing(pad_of.call(0)), stick, 0.0, false)
 		lab._Process(1.0 / 60)
 	var pt = tip(lab)
 	var ph = hand(lab)
@@ -31,7 +32,7 @@ func trial(lab, label, pad_of, stick):
 	var hand_flips = 0
 	for f in 240:
 		var p = pad_of.call(f) + Vector3(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3))
-		lab.DrivePad(p, stick, 0.0, false)
+		lab.DrivePad(lab.EvenSwing(p), stick, 0.0, false)
 		lab._Process(1.0 / 60)
 		var nt = tip(lab)
 		var nh = hand(lab)

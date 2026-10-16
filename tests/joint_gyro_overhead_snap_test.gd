@@ -1,4 +1,5 @@
 extends SceneTree
+# (The pad's turns are as at its former even gain; EvenSwing keeps the poses this test means.)
 # The arm overhead, where the anatomy's limits and the load limit change steeply: it must not
 # turn over in jerks. Over the head and across (plane 130, elevation ~180, elbow 70), the pad's
 # nose rocked: the load limit's steps used to swing the arm 30° round at 7.5° a frame. Overhead
@@ -20,7 +21,7 @@ func play(lab, pad_of):
 	for d in 7:
 		prev.append(lab.Angle(0, d))
 	for f in 420:
-		lab.DrivePad(pad_of.call(f) + Vector3(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3)), Vector2.ZERO, 0.0, false)
+		lab.DrivePad(lab.EvenSwing(pad_of.call(f) + Vector3(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3))), Vector2.ZERO, 0.0, false)
 		lab._Process(1.0 / 60)
 		for d in 7:
 			if f > 90:

@@ -1,4 +1,5 @@
 extends SceneTree
+# (The pad's turns are as at its former even gain; EvenSwing keeps the poses this test means.)
 # The arm raised overhead with the elbow bent, so the hand and sword go behind the head, then
 # swung across and out. Lifting it, the knuckles and the blade came up against the face and the
 # guard against the chest: the slide, with one normal for every contact, stood still in that
@@ -16,7 +17,7 @@ func run():
 	lab.CentrePad()
 	var warm = RandomNumberGenerator.new()
 	for i in 360:
-		lab.DrivePad(Vector3(warm.randf_range(-0.3, 0.3), warm.randf_range(-0.3, 0.3), 0), Vector2.ZERO, 0.0, false)
+		lab.DrivePad(lab.EvenSwing(Vector3(warm.randf_range(-0.3, 0.3), warm.randf_range(-0.3, 0.3), 0)), Vector2.ZERO, 0.0, false)
 		lab._Process(1.0 / 60)
 	var rng = RandomNumberGenerator.new()
 	rng.seed = 3
@@ -35,7 +36,7 @@ func run():
 	var behind = -1
 	for f in 480:
 		var p = pad_of.call(f) + Vector3(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3))
-		lab.DrivePad(p, stick_of.call(f), 0.0, false)
+		lab.DrivePad(lab.EvenSwing(p), stick_of.call(f), 0.0, false)
 		var before = []
 		for d in 7:
 			before.append(lab.Angle(0, d))

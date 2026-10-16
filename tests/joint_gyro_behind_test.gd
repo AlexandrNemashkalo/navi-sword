@@ -1,4 +1,5 @@
 extends SceneTree
+# (The pad's turns are as at its former even gain; EvenSwing keeps the poses this test means.)
 # Plays the gyro: turns the pad right so the raised sword arm swings out and back behind the
 # body, then brings it round again. Reports how far the arm trails the pad, frames where it
 # stands still although the pad moves, and how long frames take.
@@ -18,7 +19,7 @@ func play(lab, label, frames, pad):
 	for f in frames:
 		var p = pad.call(f) + Vector3(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3))
 		var wanted_before = lab.Target(0, 0)
-		lab.DrivePad(p, Vector2.ZERO, 0.0, false)
+		lab.DrivePad(lab.EvenSwing(p), Vector2.ZERO, 0.0, false)
 		var wanted = lab.Target(0, 0)
 		var start = Time.get_ticks_usec()
 		lab._Process(1.0 / 60)
@@ -43,14 +44,14 @@ func still(lab, pad, stick):
 	rng.seed = 2
 	lab.CentrePad()
 	for i in 200:
-		lab.DrivePad(pad, stick, 0.0, false)
+		lab.DrivePad(lab.EvenSwing(pad), stick, 0.0, false)
 		lab._Process(1.0 / 60)
 	var previous = []
 	for d in 7:
 		previous.append(lab.Angle(0, d))
 	var worst = 0.0
 	for f in 180:
-		lab.DrivePad(pad + Vector3(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3)), stick, 0.0, false)
+		lab.DrivePad(lab.EvenSwing(pad + Vector3(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3))), stick, 0.0, false)
 		lab._Process(1.0 / 60)
 		for d in 7:
 			worst = max(worst, abs(lab.Angle(0, d) - previous[d]))
@@ -63,7 +64,7 @@ func run():
 	lab.set_process(false)
 	lab.CentrePad()
 	for i in 120:
-		lab.DrivePad(Vector3(10, 0, 0), Vector2.ZERO, 0.0, false)
+		lab.DrivePad(lab.EvenSwing(Vector3(10, 0, 0)), Vector2.ZERO, 0.0, false)
 		lab._Process(1.0 / 60)
 	# Out and behind: the pad turned 60° right over two seconds, held, and back.
 	var turn = func(f): return Vector3(10, 60.0 * smoothstep(0.0, 1.0, min(f / 120.0, 1.0) - max((f - 180) / 120.0, 0.0)), 0)

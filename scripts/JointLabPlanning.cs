@@ -168,6 +168,8 @@ public partial class JointLab
     private const float LiveStep = 8;
     private const float LiveSpeedUp = 3;
     private float _liveFor;
+    /// <summary>The targets were last set by the pad (DrivePad): live input, not a jump.</summary>
+    private bool _padLive;
 
     private void AdvancePlannedPose(float dt)
     {
@@ -176,9 +178,13 @@ public partial class JointLab
         for (int a = 0; a < 2; a++)
             for (int d = 0; d < 7; d++)
                 biggest = Math.Max(biggest, Math.Abs(_arms[a].Target[d] - _lastRequest[a, d]));
-        if (known && biggest > 0 && biggest <= LiveStep && _lastCollide == _collide)
+        // The pad is live input however fast it goes: turned right, near the far end, its gain
+        // carries the plane more than LiveStep a frame, and it went to the planner as a jump.
+        bool live = biggest <= LiveStep || _padLive;
+        _padLive = false;
+        if (known && biggest > 0 && live && _lastCollide == _collide)
             _liveFor = 0.5f;
-        if (_liveFor > 0 && biggest <= LiveStep)
+        if (_liveFor > 0 && live)
         {
             // Live input takes over from any search or route under way: with the pad never
             // quite still, a search would restart every frame and the arm never move.

@@ -42,9 +42,32 @@ public partial class JointLab
     /// <summary>Degrees of joint per degree of pad: a comfortable wrist turn covers the arm's range.</summary>
     private const float ShoulderGain = 1.5f, TwistGain = 1.2f, ForearmGain = 1.5f;
     /// <summary>Turning the pad left/right carries the arm across or out: the wrist turns less
-    /// far that way, so it moves the shoulder further — 40° of pad takes the arm from the
-    /// front right round behind.</summary>
+    /// far that way, so it moves the shoulder further (at the centre and to the left; to the
+    /// right see SwingBackReach).</summary>
     private const float SwingGain = 2.5f;
+    /// <summary>
+    /// How far the pad turns right to wind the arm all the way back (to the plane's lower
+    /// limit), degrees. From the guard the plane has 50° to go across but 175° to go out and
+    /// back, so at one gain the pad turned 20° for the one and 70° for the other. To the right
+    /// the gain grows smoothly from SwingGain at the centre (the same feel there and to the
+    /// left) so the whole way back is this far.
+    /// </summary>
+    private const float SwingBackReach = 35;
+    /// <summary>The growth of the gain to the right: plane = guard − g·r − c·r² for r degrees turned right.</summary>
+    private static float SwingBackCurve => (GuardPlane - Dofs[0].Min - SwingGain * SwingBackReach) / (SwingBackReach * SwingBackReach);
+
+    /// <summary>The plane of elevation (from the front) for the pad turned right by this many degrees (left negative).</summary>
+    private static float SwingPlane(float right)
+        => right <= 0 ? GuardPlane - SwingGain * right : GuardPlane - SwingGain * right - SwingBackCurve * right * right;
+
+    /// <summary>How far right the pad is turned for a plane of elevation: SwingPlane's inverse.</summary>
+    private static float SwingTurn(float plane)
+    {
+        float back = GuardPlane - plane;
+        if (back <= 0)
+            return back / SwingGain;
+        return (-SwingGain + Mathf.Sqrt(SwingGain * SwingGain + 4 * SwingBackCurve * back)) / (2 * SwingBackCurve);
+    }
 
     /// <summary>The left panel: the gamepad's state and live readings. Returns its list, for the trunk's lines below.</summary>
     private VBoxContainer BuildPadPanel(CanvasLayer layer)
@@ -208,7 +231,7 @@ public partial class JointLab
         {
             // Back to the shoulder: the pad's present attitude stands for where the arm is now,
             // and the stick's rest for where the elbow and forearm are now.
-            _padCentre = pad - new Vector3((t[1] - GuardElevation) / ShoulderGain, -(t[0] - GuardPlane) / SwingGain, -t[2] / TwistGain);
+            _padCentre = pad - new Vector3((t[1] - GuardElevation) / ShoulderGain, SwingTurn(t[0]), -t[2] / TwistGain);
             _elbowRest = t[3] - 60 * stick.Y;
             _turnRest = t[4] + 80 * stick.X;
         }
@@ -218,7 +241,7 @@ public partial class JointLab
         if (!fine)
         {
             p = pad - _padCentre;
-            want[0] = GuardPlane - SwingGain * p.Y;        // turned right: the arm goes out to the side
+            want[0] = SwingPlane(p.Y);                     // turned right: the arm goes out to the side and back
             want[1] = GuardElevation + ShoulderGain * p.X; // nose up: the arm rises
             want[2] = -TwistGain * p.Z;                    // rolled right: the arm turns outward
             want[3] = _elbowRest + 60 * stick.Y;           // stick down bends the elbow
@@ -234,6 +257,7 @@ public partial class JointLab
             want[6] = _held[6] + 17 * stick.X;             // stick right tilts it to the thumb
         }
         want[3] = Mathf.Lerp(want[3], 0, straighten);
+        _padLive = true;
 
         for (int d = 0; d < Dofs.Length; d++)
         {
@@ -247,6 +271,12 @@ public partial class JointLab
         }
         return p;
     }
+
+    /// <summary>
+    /// For tests written when the pad turned the plane at one even gain (SwingGain both ways):
+    /// the same attitude, turned as far as the plane those tests meant now takes.
+    /// </summary>
+    public Vector3 EvenSwing(Vector3 pad) => new(pad.X, SwingTurn(GuardPlane - SwingGain * pad.Y), pad.Z);
 
     /// <summary>For tests: the arm's plane of elevation as the slider measures it (from the front).</summary>
     public float PlaneFromFront(int arm) => FromFront(arm, _arms[arm].Angles[0]);

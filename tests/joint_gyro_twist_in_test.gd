@@ -1,4 +1,5 @@
 extends SceneTree
+# (The pad's turns are as at its former even gain; EvenSwing keeps the poses this test means.)
 # The arm forward and a little raised, elbow bent, the pad rolled to turn the shoulder in. Past
 # 40° in, the raised arm is in the painful arc: the twist used to stop dead there (at the arc's
 # edge the elevation does not change the pain, so the slide could only stop). Now the aim
@@ -30,7 +31,7 @@ func run():
 		last.append(0.0)
 		prev.append(lab.Angle(0, d))
 	for f in 400:
-		lab.DrivePad(pad_of.call(f) + Vector3(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3)), Vector2.ZERO, 0.0, false)
+		lab.DrivePad(lab.EvenSwing(pad_of.call(f) + Vector3(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3))), Vector2.ZERO, 0.0, false)
 		var start = Time.get_ticks_usec()
 		lab._Process(1.0 / 60)
 		if f >= 30:

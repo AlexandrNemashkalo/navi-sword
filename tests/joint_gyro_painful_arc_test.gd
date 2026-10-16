@@ -1,4 +1,5 @@
 extends SceneTree
+# (The pad's turns are as at its former even gain; EvenSwing keeps the poses this test means.)
 # Between two guards in the painful arc (raised 100–118°, the pad rolled to turn the shoulder in
 # 57–80°): the twist cannot go past 40° there. Deep in the arc the elevation used to carry the
 # arm out over its top and back down, 25° up and down, while the pad held level; now it leaves
@@ -31,7 +32,7 @@ func run():
 		last.append(0.0)
 		prev.append(lab.Angle(0, d))
 	for f in 400:
-		lab.DrivePad(pad_of.call(f) + Vector3(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3)), Vector2.ZERO, 0.0, false)
+		lab.DrivePad(lab.EvenSwing(pad_of.call(f) + Vector3(rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3), rng.randf_range(-0.3, 0.3))), Vector2.ZERO, 0.0, false)
 		var start = Time.get_ticks_usec()
 		lab._Process(1.0 / 60)
 		if f >= 30:
