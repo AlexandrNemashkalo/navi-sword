@@ -3,30 +3,33 @@ using System.Collections.Generic;
 using Godot;
 
 /// <summary>
-/// A map of where the sword arm can go behind the back, worked out ahead of time.
+/// The contact map: where the sword arm can go wherever it may run into something — behind the
+/// back, against the trunk, across the chest — worked out ahead of time.
 ///
-/// Behind the back the arm's targets keep running into the body, the shoulder's limits and the
-/// painful zones, and the live solver, given only a frame for each, settles them a little
-/// differently every time: the arm shook. The same moves come round again and again, so the
-/// answer is worked out once, to convergence, on a grid of sword-arm targets — plane of
-/// elevation × elevation × elbow — and the solver is then aimed at the mapped pose instead of
-/// at the raw target. Each cell is solved starting from a solved neighbour, so the map is
-/// continuous; between cells it is interpolated. A target the body does not block maps to
-/// itself.
+/// Where the arm's target runs into the body, the shoulder's limits or the painful zones, the
+/// live solver, given only a frame each time, settled it a little differently every frame, and
+/// spent the frame doing it: the arm shook and the scene stuttered. The same moves come round
+/// again and again, so the answer is worked out once, to convergence, on a grid of sword-arm
+/// targets — plane of elevation × elevation × humeral twist × elbow — and the solver is aimed at
+/// the mapped pose instead of the raw target; reaching a pose that is already clear takes it no
+/// work. Each cell is solved starting from a solved neighbour, so the map is continuous;
+/// between cells it is interpolated. A target nothing blocks maps to itself.
 ///
-/// The map is built a few milliseconds a frame while the scene runs, then saved; later runs
-/// load it. It is rebuilt when the body's volumes, the arm's thickness or MapVersion change.
-/// It is built with the twist, forearm and wrist at their rest and the free arm hanging; what
-/// it stores is the correction to the target, which is laid on whatever those are.
+/// The map ships with the project (data/joint_contact_map.bin); if what it depends on has
+/// changed (MapVersion, the body's volumes, the arms' thickness) it is rebuilt a few
+/// milliseconds a frame and saved to user://. It is built with the forearm and wrist at rest
+/// and the free arm hanging; it stores the correction to the target, which is laid on whatever
+/// those are.
 /// </summary>
 public partial class JointLab
 {
     /// <summary>Bump when the anatomy, the pain zones or the solver change what the arm may do.</summary>
-    private const int MapVersion = 1;
-    private const float MapPlaneFrom = -95, MapPlaneStep = 5, MapRaiseStep = 7.5f, MapElbowStep = 10;
-    private const int MapPlanes = 23, MapRaises = 23, MapElbows = 14; // −95…15°, 0…165°, 0…130°
-    private const int MapCells = MapPlanes * MapRaises * MapElbows;
-    private const string MapFile = "user://joint_back_map.bin";
+    private const int MapVersion = 2;
+    private const float MapPlaneFrom = -95, MapPlaneStep = 5, MapRaiseStep = 7.5f, MapTwistFrom = -80, MapTwistStep = 20, MapElbowStep = 10;
+    // −95…130° plane, 0…165° elevation, −80…80° twist, 0…130° elbow.
+    private const int MapPlanes = 46, MapRaises = 23, MapTwists = 9, MapElbows = 14;
+    private const int MapCells = MapPlanes * MapRaises * MapTwists * MapElbows;
+    private const string MapShipped = "res://data/joint_contact_map.bin", MapSaved = "user://joint_contact_map.bin";
     /// <summary>The free arm hanging, as the map is built.</summary>
     private static readonly float[] MapLeft = { 0, 0, 0, 0, 0, -20, -10 };
     private static readonly float[] MapWeight = { 1, 1, 1, 1, 0.2f, 0.2f, 0.2f };
@@ -40,17 +43,109 @@ public partial class JointLab
     private bool _mapSeeded, _mapComplete;
     private int _mapKey;
     private Label _mapLabel = null!;
+    private string _settlePath = "";
+    /// <summary>How the solver's frames went: still, straight step, hold, stop at contact, full solve.</summary>
+    private readonly int[] _pathCount = new int[6];
+    public string SolverStats => $"still {_pathCount[0]}, straight {_pathCount[1]}, hold {_pathCount[2]}, stop at contact {_pathCount[3]}, slide {_pathCount[4]}, full solve {_pathCount[5]}";
+    public bool UseCheapSlide { get; set; } = true;
 
-    private static int Cell(int p, int e, int b) => (p * MapRaises + e) * MapElbows + b;
+    /// <summary>
+    /// Where each arm starts and goes back to on reset. The free arm is held behind the back,
+    /// pressed to it, elbow bent and the forearm across the small of the back, as a one-handed
+    /// swordsman keeps it (lifted just clear of the body by ClearLeft).
+    /// </summary>
+    private static readonly float[] LeftRest = { -60, 30, 75, 110, 40, -20, -10 };
+    private static float Rest(int arm, int dof) => arm == 1 ? LeftRest[dof] : Dofs[dof].Default;
 
-    private static (int P, int E, int B) Unpack(int cell)
-        => (cell / (MapRaises * MapElbows), cell / MapElbows % MapRaises, cell % MapElbows);
+    private readonly float[] _leftFor = new float[7], _leftClear = new float[7];
+    private float _leftTwist = float.NaN;
+
+    /// <summary>
+    /// The passive free arm, lifted out of the body: hanging straight it sank two centimetres
+    /// into the hip. Worked out only when its sliders change or the trunk has turned a few
+    /// degrees since — nothing the sword arm does moves it.
+    /// </summary>
+    private float[] ClearLeft(float[] aim)
+    {
+        bool same = Mathf.Abs(_twist - _leftTwist) < 3;
+        for (int d = 0; d < 7 && same; d++)
+            if (aim[d] != _leftFor[d]) same = false;
+        if (same)
+            return _leftClear;
+        aim.CopyTo(_leftFor, 0);
+        _leftTwist = _twist;
+        var a = (float[])aim.Clone();
+        const float h = 0.5f;
+        // Lifted clear by the shoulder (plane and elevation); the bent elbow and the twist stay
+        // as set — unbending the elbow was the cheapest way out, and undid a hand behind the back.
+        Span<float> g = stackalloc float[2];
+        for (int iteration = 0; iteration < 30; iteration++)
+        {
+            float depth = Depth(_arms[1], a);
+            if (depth < 0.0002f)
+                break;
+            float norm = 0;
+            for (int d = 0; d < 2; d++)
+            {
+                float keep = a[d];
+                a[d] = Mathf.Clamp(keep + h, Dofs[d].Min, Dofs[d].Max);
+                g[d] = (Depth(_arms[1], a) - depth) / h;
+                a[d] = keep;
+                norm += g[d] * g[d];
+            }
+            if (norm < 1e-12f)
+                break;
+            for (int d = 0; d < 2; d++)
+                a[d] = Mathf.Clamp(a[d] - depth / norm * g[d], Dofs[d].Min, Dofs[d].Max);
+            Anatomy(a);
+        }
+        a.CopyTo(_leftClear, 0);
+        return _leftClear;
+    }
+    /// <summary>An arm deeper than this (metres of overlap) is inside something and is pushed out by the full solver.</summary>
+    private const float Penetrating = 0.0005f;
+    private readonly float[] _solveAlong = new float[11];
+    public void ResetSolverStats() => System.Array.Clear(_pathCount);
+    /// <summary>For tests: frames of each kind since the last reset (still, straight, hold, stop at contact, slide, full solve).</summary>
+    public int SolverFrames(int kind) => _pathCount[kind];
+    /// <summary>
+    /// Live input: a joint weighted above Driven is one the player has just moved; the others
+    /// return to their aim at ReturnSpeed (degrees per second), and only while clear.
+    /// </summary>
+    private const float Driven = 5, ReturnSpeed = 40;
+    private readonly float[] _solveAimNow = new float[11], _solveFull = new float[11];
+
+    /// <summary>
+    /// Live input: the trunk follows the sword arm's goal, but not its every tremor. The goal,
+    /// carrying the pad's noise times the gains, jittered — most of all with the arm pressed
+    /// against the body, where the goal keeps moving although the arm cannot — and the trunk,
+    /// turning with it, rocked the free arm. So the trunk eases after the goal (time constant
+    /// 1/TwistResponse seconds), which smooths the tremor away, and turns no faster than
+    /// TwistSpeed. (A dead band did the smoothing first, but the trunk then went in stops and
+    /// starts that jolted the sword.)
+    /// </summary>
+    private const float TwistResponse = 15, TwistSpeed = 240;
+
+    private float SteadyTwist(float wanted, float dt)
+    {
+        if (!float.IsFinite(_twist))
+            return wanted;
+        float off = (wanted - _twist) * (1 - Mathf.Exp(-TwistResponse * dt));
+        return _twist + Mathf.Clamp(off, -TwistSpeed * dt, TwistSpeed * dt);
+    }
+
+    private static readonly int[] MapSize = { MapPlanes, MapRaises, MapTwists, MapElbows };
+
+    private static int Cell(int p, int e, int t, int b) => ((p * MapRaises + e) * MapTwists + t) * MapElbows + b;
+
+    private static (int P, int E, int T, int B) Unpack(int cell)
+        => (cell / (MapRaises * MapTwists * MapElbows), cell / (MapTwists * MapElbows) % MapRaises, cell / MapElbows % MapTwists, cell % MapElbows);
 
     /// <summary>A cell's sword-arm target, as the sliders measure it (plane from the front).</summary>
     private static float[] CellGoal(int cell)
     {
-        var (p, e, b) = Unpack(cell);
-        return new[] { MapPlaneFrom + p * MapPlaneStep, e * MapRaiseStep, 0, b * MapElbowStep, 0, -20, -10 };
+        var (p, e, t, b) = Unpack(cell);
+        return new[] { MapPlaneFrom + p * MapPlaneStep, e * MapRaiseStep, MapTwistFrom + t * MapTwistStep, b * MapElbowStep, 0, -20, -10 };
     }
 
     /// <summary>
@@ -80,30 +175,47 @@ public partial class JointLab
     }
 
     /// <summary>
-    /// Lays the map's correction on the sword arm's aim, interpolated between the eight cells
-    /// round its goal. Outside the map, or where it is not built yet, the aim is left as it is.
+    /// Lays the map's correction on the sword arm's aim, interpolated between the sixteen cells
+    /// round its goal. Where the map is not built yet, the aim is left as it is.
     /// </summary>
-    private void ApplyBackMap(float[] goal, float[] aim)
+    /// <summary>
+    /// For tests: switch the contact map, the slow return and the stop at contact off and on.
+    /// The map is off: built with the wrist at rest, its corrections fought the wrist turning
+    /// the sword away from the body, and across the chest the blade's tip reversed 23–26 times
+    /// in four seconds against 2–4 without it. It needs the wrist in it before it can help.
+    /// </summary>
+    public bool UseContactMap { get; set; } = false;
+    public float StopAtContactMin { get; set; } = 0.02f;
+    public bool UseSlowReturn { get; set; } = true;
+    public bool UseStopAtContact { get; set; } = true;
+
+    private void ApplyContactMap(float[] goal, float[] aim)
     {
-        if (_mapCorrection == null)
+        if (_mapCorrection == null || !UseContactMap)
             return;
-        float fp = (goal[0] - MapPlaneFrom) / MapPlaneStep;
-        if (fp < 0 || fp > MapPlanes - 1)
-            return;
-        float fe = Mathf.Clamp(goal[1] / MapRaiseStep, 0, MapRaises - 1);
-        float fb = Mathf.Clamp(goal[3] / MapElbowStep, 0, MapElbows - 1);
-        int p0 = Mathf.Min((int)fp, MapPlanes - 2), e0 = Mathf.Min((int)fe, MapRaises - 2), b0 = Mathf.Min((int)fb, MapElbows - 2);
-        float tp = fp - p0, te = fe - e0, tb = fb - b0;
+        Span<float> f = stackalloc float[4];
+        f[0] = Mathf.Clamp((goal[0] - MapPlaneFrom) / MapPlaneStep, 0, MapPlanes - 1);
+        f[1] = Mathf.Clamp(goal[1] / MapRaiseStep, 0, MapRaises - 1);
+        f[2] = Mathf.Clamp((goal[2] - MapTwistFrom) / MapTwistStep, 0, MapTwists - 1);
+        f[3] = Mathf.Clamp(goal[3] / MapElbowStep, 0, MapElbows - 1);
+        Span<int> i0 = stackalloc int[4];
+        Span<float> frac = stackalloc float[4];
+        for (int k = 0; k < 4; k++)
+        {
+            i0[k] = Mathf.Min((int)f[k], MapSize[k] - 2);
+            frac[k] = f[k] - i0[k];
+        }
         Span<float> correction = stackalloc float[7], low = stackalloc float[7], high = stackalloc float[7];
         low.Fill(float.MaxValue);
         high.Fill(float.MinValue);
-        for (int corner = 0; corner < 8; corner++)
+        for (int corner = 0; corner < 16; corner++)
         {
-            int dp = corner & 1, de = (corner >> 1) & 1, db = (corner >> 2) & 1;
-            int cell = Cell(p0 + dp, e0 + de, b0 + db);
+            int dp = corner & 1, de = (corner >> 1) & 1, dt = (corner >> 2) & 1, db = (corner >> 3) & 1;
+            int cell = Cell(i0[0] + dp, i0[1] + de, i0[2] + dt, i0[3] + db);
             if (_mapState[cell] != 3)
                 return;
-            float weight = (dp == 1 ? tp : 1 - tp) * (de == 1 ? te : 1 - te) * (db == 1 ? tb : 1 - tb);
+            float weight = (dp == 1 ? frac[0] : 1 - frac[0]) * (de == 1 ? frac[1] : 1 - frac[1])
+                * (dt == 1 ? frac[2] : 1 - frac[2]) * (db == 1 ? frac[3] : 1 - frac[3]);
             for (int d = 0; d < 7; d++)
             {
                 float c = _mapCorrection[cell * 7 + d];
@@ -114,8 +226,8 @@ public partial class JointLab
         }
         // Only where the map is plain: the corners agree (no seam between two ways round an
         // obstacle, which blended would go through it) and the correction is moderate (the
-        // band along the body where the arm used to shake). Deeper in, the live solver stops
-        // the arm at the obstacle rather than sending it to a far-off "nearest" pose.
+        // band along the body). Deeper in, the live solver stops the arm at the obstacle
+        // rather than sending it to a far-off "nearest" pose.
         for (int d = 0; d < 7; d++)
             if (high[d] - low[d] > MapAgree || Mathf.Abs(high[d]) > MapLargest || Mathf.Abs(low[d]) > MapLargest)
                 return;
@@ -206,10 +318,15 @@ public partial class JointLab
     /// Works on the map for up to budgetMs: first finds which cells the body blocks, then
     /// solves those outward from the free ones, each from a solved neighbour's correction.
     /// </summary>
-    private void BuildBackMap(float budgetMs)
+    private void BuildContactMap(float budgetMs)
     {
+        if (!UseContactMap)
+        {
+            _mapLabel.Text = "";
+            return;
+        }
         if (_mapCorrection == null)
-            StartBackMap();
+            StartContactMap();
         if (_mapComplete)
             return;
         ulong deadline = Time.GetTicksUsec() + (ulong)(budgetMs * 1000);
@@ -249,7 +366,7 @@ public partial class JointLab
                 if (!any)
                 {
                     _mapComplete = true;
-                    SaveBackMap();
+                    SaveContactMap();
                     break;
                 }
                 continue;
@@ -265,26 +382,32 @@ public partial class JointLab
                 _mapCorrection![next * 7 + d] = solved[d] - target[d];
             _mapState[next] = 3;
             _mapDone++;
-            var (p, e, b) = Unpack(next);
-            foreach (var (dp, de, db) in Neighbours)
-            {
-                int np = p + dp, ne = e + de, nb = b + db;
-                if (np < 0 || np >= MapPlanes || ne < 0 || ne >= MapRaises || nb < 0 || nb >= MapElbows)
-                    continue;
-                int cell = Cell(np, ne, nb);
+            foreach (int cell in NeighboursOf(next))
                 if (_mapState[cell] == 1)
                     Enqueue(cell);
-            }
         }
         Turn(twist);
         _settled = settled;
         _mapLabel.Text = _mapComplete
-            ? "Карта зоны за спиной: готова."
-            : $"Карта зоны за спиной: строится, {100f * (_mapScanned + _mapDone) / (2f * MapCells):0}%.";
+            ? "Карта упоров: готова."
+            : $"Карта упоров: строится, {100f * (_mapScanned + _mapDone) / (2f * MapCells):0}%.";
     }
 
-    private static readonly (int, int, int)[] Neighbours =
-        { (1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1) };
+    private static IEnumerable<int> NeighboursOf(int cell)
+    {
+        var (p, e, t, b) = Unpack(cell);
+        int[] index = { p, e, t, b };
+        for (int k = 0; k < 4; k++)
+            for (int step = -1; step <= 1; step += 2)
+            {
+                int moved = index[k] + step;
+                if (moved < 0 || moved >= MapSize[k])
+                    continue;
+                int[] n = (int[])index.Clone();
+                n[k] = moved;
+                yield return Cell(n[0], n[1], n[2], n[3]);
+            }
+    }
 
     private void Enqueue(int cell)
     {
@@ -294,20 +417,14 @@ public partial class JointLab
 
     private int SolvedNeighbour(int cell)
     {
-        var (p, e, b) = Unpack(cell);
-        foreach (var (dp, de, db) in Neighbours)
-        {
-            int np = p + dp, ne = e + de, nb = b + db;
-            if (np < 0 || np >= MapPlanes || ne < 0 || ne >= MapRaises || nb < 0 || nb >= MapElbows)
-                continue;
-            if (_mapState[Cell(np, ne, nb)] == 3)
-                return Cell(np, ne, nb);
-        }
+        foreach (int other in NeighboursOf(cell))
+            if (_mapState[other] == 3)
+                return other;
         return -1;
     }
 
     /// <summary>A key for what the map depends on: its version, the body's volumes, the arms' thickness.</summary>
-    private int BackMapKey()
+    private int ContactMapKey()
     {
         unchecked
         {
@@ -320,27 +437,34 @@ public partial class JointLab
         }
     }
 
-    private void StartBackMap()
+    private void StartContactMap()
     {
         _mapCorrection = new float[MapCells * 7];
         _mapState = new byte[MapCells];
-        _mapKey = BackMapKey();
-        using var file = FileAccess.Open(MapFile, FileAccess.ModeFlags.Read);
+        _mapKey = ContactMapKey();
+        if (!LoadContactMap(MapShipped))
+            LoadContactMap(MapSaved);
+    }
+
+    private bool LoadContactMap(string path)
+    {
+        using var file = FileAccess.Open(path, FileAccess.ModeFlags.Read);
         if (file == null || file.Get32() != (uint)_mapKey || file.Get32() != MapCells)
-            return;
+            return false;
         for (int cell = 0; cell < MapCells; cell++)
         {
             _mapState[cell] = 3;
             for (int d = 0; d < 7; d++)
-                _mapCorrection[cell * 7 + d] = file.GetFloat();
+                _mapCorrection![cell * 7 + d] = file.GetFloat();
         }
         _mapScanned = _mapDone = MapCells;
         _mapSeeded = _mapComplete = true;
+        return true;
     }
 
-    private void SaveBackMap()
+    private void SaveContactMap(string path = MapSaved)
     {
-        using var file = FileAccess.Open(MapFile, FileAccess.ModeFlags.Write);
+        using var file = FileAccess.Open(path, FileAccess.ModeFlags.Write);
         if (file == null)
             return;
         file.Store32((uint)_mapKey);
@@ -350,71 +474,42 @@ public partial class JointLab
     }
 
     /// <summary>For tests: the map's progress (0–1) and whether it is done.</summary>
-    public float BackMapProgress => (_mapScanned + _mapDone) / (2f * MapCells);
-    public bool BackMapReady => _mapComplete;
-    /// <summary>For tests: how many cells the body blocks, and the largest correction (degrees).</summary>
-    public string BackMapStats()
+    public float ContactMapProgress => (_mapScanned + _mapDone) / (2f * MapCells);
+    public bool ContactMapReady => _mapComplete;
+
+    /// <summary>For tests: how many cells are corrected, and how much.</summary>
+    public string ContactMapStats()
     {
-        int blocked = 0;
+        int corrected = 0, big = 0;
         float largest = 0;
         for (int cell = 0; cell < MapCells; cell++)
         {
             float size = 0;
             for (int d = 0; d < 7; d++) size = Mathf.Max(size, Mathf.Abs(_mapCorrection![cell * 7 + d]));
-            if (size > 0.01f) blocked++;
+            if (size > 0.01f) corrected++;
+            if (size > MapLargest) big++;
             largest = Mathf.Max(largest, size);
         }
-        // How smooth is it: the largest change of a joint's correction between neighbours.
-        float jump = 0;
-        int jumpCell = -1, jumpDof = -1, big = 0;
-        for (int cell = 0; cell < MapCells; cell++)
-        {
-            for (int d = 0; d < 7; d++)
-                if (Mathf.Abs(_mapCorrection![cell * 7 + d]) > 45) { big++; break; }
-            var (p, e, b) = Unpack(cell);
-            foreach (var (dp, de, db) in Neighbours)
-            {
-                int np = p + dp, ne = e + de, nb = b + db;
-                if (dp < 0 || de < 0 || db < 0 || np >= MapPlanes || ne >= MapRaises || nb >= MapElbows) continue;
-                int other = Cell(np, ne, nb);
-                for (int d = 0; d < 7; d++)
-                {
-                    float step = Mathf.Abs(_mapCorrection![cell * 7 + d] - _mapCorrection[other * 7 + d]);
-                    if (step > jump) (jump, jumpCell, jumpDof) = (step, cell, d);
-                }
-            }
-        }
-        var (jp, je, jb) = jumpCell >= 0 ? Unpack(jumpCell) : (0, 0, 0);
-        int usable = 0;
-        for (int cell = 0; cell < MapCells; cell++)
-        {
-            var (p, e, b) = Unpack(cell);
-            if (p >= MapPlanes - 1 || e >= MapRaises - 1 || b >= MapElbows - 1) continue;
-            bool corrected = false, plain = true;
-            for (int d = 0; d < 7 && plain; d++)
-            {
-                float lo = float.MaxValue, hi = float.MinValue;
-                for (int corner = 0; corner < 8; corner++)
-                {
-                    float c = _mapCorrection![Cell(p + (corner & 1), e + ((corner >> 1) & 1), b + ((corner >> 2) & 1)) * 7 + d];
-                    lo = Mathf.Min(lo, c); hi = Mathf.Max(hi, c);
-                }
-                if (Mathf.Abs(lo) > 0.01f || Mathf.Abs(hi) > 0.01f) corrected = true;
-                if (hi - lo > MapAgree || Mathf.Abs(hi) > MapLargest || Mathf.Abs(lo) > MapLargest) plain = false;
-            }
-            if (corrected && plain) usable++;
-        }
-        return $"{blocked} of {MapCells} cells corrected, {big} by more than 45°, largest correction {largest:0.0}°; usable corrected boxes {usable}; "
-            + $"largest step between neighbours {jump:0.0}° (joint {jumpDof}, at plane {MapPlaneFrom + jp * MapPlaneStep}, raise {je * MapRaiseStep}, elbow {jb * MapElbowStep})";
+        return $"{corrected} of {MapCells} cells corrected, {big} by more than {MapLargest}°, largest {largest:0.0}°";
     }
 
-    /// <summary>For tests: goal and aim of a sword-arm joint, and whether the solver thinks it has settled.</summary>
-    public string Trace(int dof) => $"goal {_arms[0].Goal[dof]:0.00} aim {_arms[0].Aim[dof]:0.00} angle {_arms[0].Angles[dof]:0.00} settled {_settled} live {_liveFor:0.00} path {_settlePath}";
-    private string _settlePath = "";
-
-    /// <summary>For tests: build the map now, without the per-frame budget.</summary>
-    public void BuildBackMapNow()
+    /// <summary>For tests and for shipping: build the map now, without the per-frame budget.</summary>
+    public void BuildContactMapNow()
     {
-        while (!_mapComplete) BuildBackMap(50);
+        UseContactMap = true;
+        while (!_mapComplete) BuildContactMap(50);
     }
+
+    /// <summary>For shipping: write the built map into the project, where every run finds it.</summary>
+    public void ShipContactMap()
+    {
+        DirAccess.MakeDirRecursiveAbsolute(ProjectSettings.GlobalizePath("res://data"));
+        SaveContactMap(MapShipped);
+    }
+
+    /// <summary>For tests: an arm's target, goal, aim and angles.</summary>
+    public string ArmTrace(int arm) => $"target [{string.Join(" ", System.Array.ConvertAll(_arms[arm].Target, x => x.ToString("0")))}] goal [{string.Join(" ", System.Array.ConvertAll(_arms[arm].Goal, x => x.ToString("0")))}] aim [{string.Join(" ", System.Array.ConvertAll(_arms[arm].Aim, x => x.ToString("0")))}] angles [{string.Join(" ", System.Array.ConvertAll(_arms[arm].Angles, x => x.ToString("0")))}] planning {PlanningPose} route {FollowingPosePath} blocked {PosePathBlocked}";
+
+    /// <summary>For tests: goal and aim of a sword-arm joint, and how the solver went.</summary>
+    public string Trace(int dof) => $"goal {_arms[0].Goal[dof]:0.00} aim {_arms[0].Aim[dof]:0.00} angle {_arms[0].Angles[dof]:0.00} settled {_settled} live {_liveFor:0.00} path {_settlePath}";
 }
