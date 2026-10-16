@@ -5,8 +5,8 @@ using Godot;
 /// The sword's sound, made as it is heard, from the motion itself: nothing is recorded.
 ///
 /// The swish: noise through a band-pass filter whose pitch and loudness follow the speed of
-/// the blade's tip — a slow sweep a low hush, a cut a loud high whistle. Under about
-/// SwishFrom metres a second nothing at all.
+/// the blade's tip — a quick sweep a low hush, a cut a loud high whistle. Under SwishFrom
+/// metres a second (an ordinary move of the arm) nothing at all: only cuts sound.
 ///
 /// The lash, R2's own: pressing R2 (which straightens the elbow) cracks — a short burst of
 /// high noise over a low thump, the harder the faster the trigger went down — and when the
@@ -23,7 +23,7 @@ public partial class JointLab
 {
     private const int MixRate = 44100;
     /// <summary>The tip's speed (m/s) where the swish begins, and where it is at its loudest and highest.</summary>
-    private const float SwishFrom = 1.5f, SwishFull = 12;
+    private const float SwishFrom = 6, SwishFull = 16;
     /// <summary>R2 counts as pressed above this pull, and the snap comes once the elbow is straighter than SnapElbow.</summary>
     private const float PressedAt = 0.25f, SnapElbow = 12;
 
@@ -48,13 +48,15 @@ public partial class JointLab
     public int Snaps { get; private set; }
     /// <summary>The sword's sound on or off (the checkbox).</summary>
     public bool SwordSound { get; set; } = true;
+    /// <summary>The sword's loudness, 0–1 (the slider): at full, a hard cut plays at about a third of full scale.</summary>
+    public float SwordVolume { get; set; } = 0.35f;
 
     private void BuildSound()
     {
         _soundPlayer = new AudioStreamPlayer
         {
             Stream = new AudioStreamGenerator { MixRate = MixRate, BufferLength = 0.05f }, // 50 ms: the sound answers the motion within about three frames
-            VolumeDb = -6,
+            VolumeDb = Mathf.LinearToDb(SwordVolume),
         };
         AddChild(_soundPlayer);
         _soundPlayer.Play();
@@ -66,6 +68,19 @@ public partial class JointLab
         var sound = new CheckBox { Text = "Звук меча (свист, хлёст на R2)", ButtonPressed = SwordSound };
         sound.Toggled += on => SwordSound = on;
         list.AddChild(sound);
+        var volumeRow = new HBoxContainer();
+        list.AddChild(volumeRow);
+        var volumeValue = new Label { Text = $"{100 * SwordVolume:0}%", CustomMinimumSize = new Vector2(48, 0) };
+        volumeRow.AddChild(new Label { Text = "Громкость меча" });
+        var volume = new HSlider { MinValue = 0, MaxValue = 100, Step = 1, Value = 100 * SwordVolume, SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+        volume.ValueChanged += v =>
+        {
+            SwordVolume = (float)v / 100;
+            volumeValue.Text = $"{v:0}%";
+            if (_soundPlayer != null) _soundPlayer.VolumeDb = Mathf.LinearToDb(Mathf.Max(SwordVolume, 1e-4f));
+        };
+        volumeRow.AddChild(volume);
+        volumeRow.AddChild(volumeValue);
         var pad = new CheckBox { Text = "Звук в динамик геймпада (по USB)" };
         pad.Toggled += on =>
         {

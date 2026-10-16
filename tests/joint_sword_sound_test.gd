@@ -1,6 +1,6 @@
 extends SceneTree
-# The sword's sound follows the motion: held still, no swish; a quick cut with the pad, a loud
-# one. R2 pressed cracks once, and the elbow coming straight with R2 held snaps once; let go and
+# The sword's sound follows the motion: held still or moved calmly, no swish; a quick cut with
+# the pad, a loud one. R2 pressed cracks once, and the elbow coming straight with R2 held snaps once; let go and
 # pressed again, both again. Run: godot --headless --path . --script res://tests/joint_sword_sound_test.gd
 
 func _initialize():
@@ -18,6 +18,11 @@ func run():
 	for i in 90:
 		step(lab, Vector3.ZERO, 0.0)
 	var still = lab.SwishLevel
+	# An ordinary move: the pad's nose up 30° and back over two seconds — silent.
+	var calm = 0.0
+	for f in 120:
+		step(lab, Vector3(30.0 * sin(f * PI / 120.0), 0, 0), 0.0)
+		calm = max(calm, lab.SwishLevel)
 	# A quick cut: the pad's nose up 40° and back down in a third of a second.
 	var loudest = 0.0
 	var fastest = 0.0
@@ -40,8 +45,8 @@ func run():
 		step(lab, Vector3.ZERO, min(1.0, f / 3.0))
 	var cracks2 = lab.Cracks - cracks0
 	var snaps2 = lab.Snaps - snaps0
-	print("still swish %.2f; quick cut: tip %.1f m/s, swish %.2f; R2: cracks %d, snaps %d, again %d/%d" % [still, fastest, loudest, cracks1, snaps1, cracks2, snaps2])
-	if still < 0.05 and loudest > 0.5 and cracks1 == 1 and snaps1 == 1 and cracks2 == 2 and snaps2 == 2:
+	print("calm move: swish %.2f; " % calm, "still swish %.2f; quick cut: tip %.1f m/s, swish %.2f; R2: cracks %d, snaps %d, again %d/%d" % [still, fastest, loudest, cracks1, snaps1, cracks2, snaps2])
+	if still < 0.05 and calm < 0.05 and loudest > 0.5 and cracks1 == 1 and snaps1 == 1 and cracks2 == 2 and snaps2 == 2:
 		print("PASS sword sound: swish with the tip's speed, a crack and a snap on each R2 cut")
 		quit()
 	else:
