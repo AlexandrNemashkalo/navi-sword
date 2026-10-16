@@ -17,6 +17,13 @@ func run():
 			lab.DrivePad(pad, Vector2.ZERO, 0.0, false)
 			await process_frame
 		root.get_viewport().get_texture().get_image().save_png(out + "/view_%d.png" % k)
+	for m in lab.find_children("*", "MeshInstance3D", true, false):
+		if m.get_parent() is Skeleton3D:
+			m.visible = false
+	await frames(3)
+	root.get_viewport().get_texture().get_image().save_png(out + "/view_nobody.png")
+	for m in lab.find_children("*", "MeshInstance3D", true, false):
+		m.visible = true
 	lab.SeeThrough = false
 	lab.call("ApplySeeThrough")
 	await frames(5)

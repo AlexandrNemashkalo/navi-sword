@@ -1257,6 +1257,7 @@ public partial class JointLab : Node3D
             _arms[0].Angles.CopyTo(_wrappedFor, 0);
         }
         PlaceCamera();
+        PlaceSeeThrough();
     }
 
     /// <summary>
@@ -1728,7 +1729,7 @@ public partial class JointLab : Node3D
         var collide = new CheckBox { Text = "Руки скользят по телу и друг по другу", ButtonPressed = true };
         collide.Toggled += on => { _collide = on; _settled = false; };
         toggles.AddChild(collide);
-        var ghost = new CheckBox { Text = "Прозрачный манекен", ButtonPressed = SeeThrough };
+        var ghost = new CheckBox { Text = "Манекен растворяется вокруг меча", ButtonPressed = SeeThrough };
         ghost.Toggled += on => { SeeThrough = on; ApplySeeThrough(); };
         toggles.AddChild(ghost);
                 var volumes = new CheckBox { Text = "Объёмы тела" };
