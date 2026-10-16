@@ -136,6 +136,8 @@ public partial class JointLab : Node3D
         var model = GD.Load<PackedScene>("res://assets/mannequiny/mannequiny.glb").Instantiate<Node3D>();
         model.Rotation = new Vector3(0, Mathf.Pi, 0);
         AddChild(model);
+        _model = model;
+        _modelStart = model.Position;
         foreach (Node node in model.FindChildren("*", "MeshInstance3D", true, false))
             FlipNormals((MeshInstance3D)node);
         _skeleton = (Skeleton3D)model.FindChild("Skeleton3D", true, false);
@@ -1192,13 +1194,15 @@ public partial class JointLab : Node3D
         BuildContactMap(3);
         // Run independently of Settle's early exit: a foot must finish its step
         // even after the arm sliders have already reached their goals.
-        if (_footwork.Update(float.IsFinite(_twist) ? _twist : Bladed, (float)delta))
+        Walk((float)delta);
+        if (_footwork.Update(float.IsFinite(_twist) ? _twist : Bladed, (float)delta, _moved, _velocity))
         {
             foreach (var entry in _legIdle)
                 _legs.Move(entry.Key, _skeleton.GetBoneGlobalPose(entry.Key) * entry.Value.AffineInverse());
             _settled = false;
             if (_volumesShown != null) PlaceVolumes();
         }
+        PlaceModel();
         AdvancePlannedPose((float)delta);
         _cameraHeading += (_footwork.Heading - _cameraHeading) * (1 - Mathf.Exp(-CameraFollow * (float)delta));
         // Search may have evaluated a very different pose. Diagnostics describe
@@ -1610,9 +1614,9 @@ public partial class JointLab : Node3D
         Vector3 facing = new Basis(Vector3.Up, Mathf.DegToRad(_cameraHeading)) * _forward;
         float behind = Mathf.Clamp(-away.Dot(facing), 0, 1);
         Vector3 side = round * _right;
-        _camera.GlobalPosition = _chest + away * CameraDistance + Vector3.Up * Mathf.Lerp(0.15f, CameraHeight, behind)
+        _camera.GlobalPosition = CameraChest + away * CameraDistance + Vector3.Up * Mathf.Lerp(0.15f, CameraHeight, behind)
             - side * (CameraSide * behind); // _right turned round with the camera points to its left: minus is over the right shoulder
-        _camera.LookAt(_chest - away * (CameraLookAhead * behind) + Vector3.Up * Mathf.Lerp(-0.1f, 0.05f, behind));
+        _camera.LookAt(CameraChest - away * (CameraLookAhead * behind) + Vector3.Up * Mathf.Lerp(-0.1f, 0.05f, behind));
     }
 
     private void BuildWorld()
@@ -1633,15 +1637,7 @@ public partial class JointLab : Node3D
         var fill = new DirectionalLight3D { LightEnergy = 0.4f };
         AddChild(fill);
         fill.RotationDegrees = new Vector3(-20, 200, 0);
-        AddChild(new MeshInstance3D
-        {
-            Mesh = new BoxMesh
-            {
-                Size = new Vector3(8, 0.2f, 8),
-                Material = new StandardMaterial3D { AlbedoColor = new Color(0.19f, 0.23f, 0.27f), Roughness = 0.8f },
-            },
-            Position = new Vector3(0, -0.1f, 0),
-        });
+        AddChild(Floor());
         _camera = new Camera3D { Fov = 45, Current = true };
         AddChild(_camera);
     }
