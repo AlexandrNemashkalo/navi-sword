@@ -61,6 +61,11 @@ public partial class JointLab : Node3D
     [Export(PropertyHint.Range, "-180,180,1")]
     public float CameraOrbit { get; set; } = 180;
     private float _orbit;
+    /// <summary>The camera from behind: how far, how high over the chest, how far to the right, and how far ahead of the fighter it looks (metres).</summary>
+    [Export] public float CameraDistance { get; set; } = 2.7f;
+    [Export] public float CameraHeight { get; set; } = 0.5f;
+    [Export] public float CameraSide { get; set; } = 0.45f;
+    [Export] public float CameraLookAhead { get; set; } = 2.0f;
     /// <summary>The stance's turn as the camera follows it (eased after the steps), degrees.</summary>
     private float _cameraHeading;
     private BodyVolumes _body = null!;
@@ -274,6 +279,10 @@ public partial class JointLab : Node3D
         }
         foreach (var finger in _fingers)
             finger.Radius = Mathf.Min(0.012f, _body.Radius(finger.Bones[1], At(_skeleton.GetBoneName(finger.Bones[1])), At(_skeleton.GetBoneName(finger.Bones[2]))));
+        _bodyMeshes = new List<MeshInstance3D>();
+        foreach (Node node in model.FindChildren("*", "MeshInstance3D", true, false))
+            _bodyMeshes.Add((MeshInstance3D)node);
+        ApplySeeThrough();
         ShowVolumes();
         BuildPanel();
         Settle(1);
@@ -1588,9 +1597,18 @@ public partial class JointLab : Node3D
             return;
         // Round with the stance: the steps turn the whole fighter, and the camera, standing
         // still, ended up looking at his back. Not with the trunk's turn, which every cut moves.
-        Vector3 offset = new Basis(Vector3.Up, Mathf.DegToRad(_orbit + _cameraHeading)) * (_forward * 2.3f);
-        _camera.GlobalPosition = _chest + offset + Vector3.Up * 0.15f;
-        _camera.LookAt(_chest - Vector3.Up * 0.1f);
+        Basis round = new(Vector3.Up, Mathf.DegToRad(_orbit + _cameraHeading));
+        Vector3 away = round * _forward;
+        // From behind, over the right shoulder: straight behind at chest height the body hid the
+        // sword (and would hide the opponent). Raised and to the side, looking past him to a
+        // point ahead, the space in front shows over the shoulder. Faded out as the camera comes
+        // round to the front, where it looks at him as before.
+        Vector3 facing = new Basis(Vector3.Up, Mathf.DegToRad(_cameraHeading)) * _forward;
+        float behind = Mathf.Clamp(-away.Dot(facing), 0, 1);
+        Vector3 side = round * _right;
+        _camera.GlobalPosition = _chest + away * CameraDistance + Vector3.Up * Mathf.Lerp(0.15f, CameraHeight, behind)
+            - side * (CameraSide * behind); // _right turned round with the camera points to its left: minus is over the right shoulder
+        _camera.LookAt(_chest - away * (CameraLookAhead * behind) + Vector3.Up * Mathf.Lerp(-0.1f, 0.05f, behind));
     }
 
     private void BuildWorld()
@@ -1710,7 +1728,10 @@ public partial class JointLab : Node3D
         var collide = new CheckBox { Text = "Руки скользят по телу и друг по другу", ButtonPressed = true };
         collide.Toggled += on => { _collide = on; _settled = false; };
         toggles.AddChild(collide);
-        var volumes = new CheckBox { Text = "Объёмы тела" };
+        var ghost = new CheckBox { Text = "Прозрачный манекен", ButtonPressed = SeeThrough };
+        ghost.Toggled += on => { SeeThrough = on; ApplySeeThrough(); };
+        toggles.AddChild(ghost);
+                var volumes = new CheckBox { Text = "Объёмы тела" };
         volumes.Toggled += on => _volumesShown.Visible = on;
         toggles.AddChild(volumes);
         var left = BuildPadPanel(layer);

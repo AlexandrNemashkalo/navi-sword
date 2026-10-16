@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Godot;
 
 /// <summary>The model's and the sword's loading for the joint lab.</summary>
@@ -29,6 +30,37 @@ public partial class JointLab
             flipped.SurfaceSetMaterial(surface, source.SurfaceGetMaterial(surface));
         }
         instance.Mesh = flipped;
+    }
+
+    /// <summary>The mannequin drawn see-through, so the sword behind him shows (on by default).</summary>
+    [Export] public bool SeeThrough { get; set; } = true;
+    /// <summary>How opaque the see-through mannequin is.</summary>
+    private const float SeeThroughAlpha = 0.45f;
+    private List<MeshInstance3D> _bodyMeshes = new();
+
+    /// <summary>
+    /// Lays a see-through copy of each of the mannequin's materials over it, or takes them off.
+    /// Depth pre-pass: the body still hides its own far side, not a blur of both; the sword,
+    /// drawn opaque before it, shows through.
+    /// </summary>
+    private void ApplySeeThrough()
+    {
+        foreach (var mesh in _bodyMeshes)
+            for (int surface = 0; surface < mesh.Mesh.GetSurfaceCount(); surface++)
+            {
+                if (!SeeThrough)
+                {
+                    mesh.SetSurfaceOverrideMaterial(surface, null);
+                    continue;
+                }
+                var ghost = mesh.Mesh.SurfaceGetMaterial(surface) is BaseMaterial3D original
+                    ? (BaseMaterial3D)original.Duplicate()
+                    : new StandardMaterial3D { AlbedoColor = new Color(0.9f, 0.93f, 1) };
+                ghost.Transparency = BaseMaterial3D.TransparencyEnum.AlphaDepthPrePass;
+                Color colour = ghost.AlbedoColor;
+                ghost.AlbedoColor = new Color(colour.R, colour.G, colour.B, SeeThroughAlpha);
+                mesh.SetSurfaceOverrideMaterial(surface, ghost);
+            }
     }
 
     /// <summary>A stick's deflection past its dead zone (16%), rescaled to reach 1 at full tilt.</summary>
