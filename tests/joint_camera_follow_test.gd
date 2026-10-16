@@ -40,7 +40,7 @@ func run():
 		print("pad %s: camera to the feet' line %.1f° (was %.1f°), feet turned to %.1f°" % ["out and behind" if side > 0 else "across", after, before, feet])
 		turned = max(turned, abs(wrapf(after - before, -180, 180)))
 	print("default orbit %.0f°, largest change of the camera's side to the fighter %.1f°" % [orbit, turned])
-	if orbit == -160 and turned < 8:
+	if orbit == 180 and turned < 8:
 		print("PASS camera follows the stance")
 		quit()
 	else:

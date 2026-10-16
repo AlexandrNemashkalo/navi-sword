@@ -4,4 +4,4 @@
 
 [node name="JointLab" type="Node3D"]
 script = ExtResource("1_lab")
-CameraOrbit = -160.0
+CameraOrbit = 180.0

@@ -56,10 +56,10 @@ public partial class JointLab : Node3D
     private Vector3 _chest, _forward, _right;
     /// <summary>
     /// Where the camera looks from by default, degrees round the fighter from his front (0 in
-    /// front, −160 behind his right shoulder). Set in the scene; the "Камера" slider moves it.
+    /// front, 180 straight behind). Set in the scene; the "Камера" slider moves it.
     /// </summary>
     [Export(PropertyHint.Range, "-180,180,1")]
-    public float CameraOrbit { get; set; } = -160;
+    public float CameraOrbit { get; set; } = 180;
     private float _orbit;
     /// <summary>The stance's turn as the camera follows it (eased after the steps), degrees.</summary>
     private float _cameraHeading;
