@@ -106,6 +106,7 @@ public partial class JointLab
         strengthRow.AddChild(strengthValue);
         _rumbleLabel = Line(1);
         BuildStaminaPanel(list);
+        BuildSoundPanel(list);
         _mapLabel = Line(1);
         list.AddChild(new HSeparator());
         return list;
@@ -270,6 +271,7 @@ public partial class JointLab
             want[6] = _held[6] + 17 * stick.X;             // stick right tilts it to the thumb
         }
         want[3] = Mathf.Lerp(want[3], 0, straighten);
+        TriggerPulled(straighten);
         _padLive = true;
 
         for (int d = 0; d < Dofs.Length; d++)

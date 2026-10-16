@@ -285,6 +285,7 @@ public partial class JointLab : Node3D
         ApplySeeThrough();
         ShowVolumes();
         BuildPanel();
+        BuildSound();
         Settle(1);
         Apply();
     }
@@ -1230,6 +1231,7 @@ public partial class JointLab : Node3D
             ? "лимит поиска — прежняя поза сохранена" : PosePathBlocked
             ? "безопасный путь не найден — измени целевую позу" : FollowingPosePath ? "движение по проверенному пути" : "свободно");
         Apply();
+        Sound((float)delta);
     }
 
     /// <summary>Lays the angles onto the bones.</summary>
