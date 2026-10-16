@@ -60,11 +60,12 @@ func run():
 	times.sort()
 	print("behind the head at frame ", behind, " paths ", paths, " stuck frames ", stuck, " p50 %.2f p95 %.2f max %.2f" % [times[times.size() / 2], times[int(times.size() * 0.95)], times[times.size() - 1]])
 	# Before this test: the full solver 6 times, 260 frames standing still, behind the head at
-	# frame 173; now 5–6 solves (timing decides), ~145 standing, frame 168. Still open: lifted straight up, the bent arm waits at the face until the pad
+	# frame 173; now 3–6 solves (timing decides), frame 168, ~180 standing: since stamina, the tired
+# arm overhead is meant to stop short of the target, which counts as standing here. Still open: lifted straight up, the bent arm waits at the face until the pad
 	# swings it out (frame ~125) — the way round starts away from the target, which no slide
 	# finds. Some standing is right: forward overhead the pad asks the upper arm through the head.
 	var solves = paths.get("solve", 0)
-	if behind >= 0 and behind <= 175 and solves <= 8 and stuck <= 180 and times[int(times.size() * 0.95)] < 4:
+	if behind >= 0 and behind <= 175 and solves <= 8 and stuck <= 200 and times[int(times.size() * 0.95)] < 4:
 		print("PASS gyro overhead: the bent arm gets behind the head, full solve rare, frames short")
 		quit()
 	else:

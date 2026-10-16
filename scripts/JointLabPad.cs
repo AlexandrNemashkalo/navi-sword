@@ -41,8 +41,12 @@ public partial class JointLab
     private Vector3 _padHeld;
     private Label _padStatus = null!, _padValues = null!, _padHelp = null!, _rumbleLabel = null!;
 
-    /// <summary>The guard the pad's centre stands for: arm forward and a little up, elbow bent.</summary>
-    private const float GuardPlane = 80, GuardElevation = 45, GuardElbow = 70;
+    /// <summary>
+    /// The guard the pad's centre stands for: arm forward and a little up, elbow bent — the
+    /// upper arm low enough (38°) for the postural load's category I (about 3.5 points; at 45°
+    /// it was 5.4, just into II).
+    /// </summary>
+    private const float GuardPlane = 80, GuardElevation = 38, GuardElbow = 70;
     /// <summary>Degrees of joint per degree of pad: a comfortable wrist turn covers the arm's range.</summary>
     private const float ShoulderGain = 1.5f, TwistGain = 1.2f, ForearmGain = 1.5f;
     /// <summary>Turning the pad left/right carries the arm across or out: the wrist turns less
@@ -192,7 +196,10 @@ public partial class JointLab
         _calibrateHeld = calibrate;
 
         bool reset = Pressed(JoyButton.RightShoulder);
-        if (reset && !_resetHeld)
+        // R1 takes the guard at once and holds it while held: the gyro is centred afresh every
+        // frame, so bringing the pad back to a comfortable hold moves nothing, and where the pad
+        // is as R1 comes up is the guard.
+        if (reset)
         {
             _motion.Recenter(Input.GetJoyGravity(_device));
             _padFilter.Reset();
@@ -319,10 +326,15 @@ public partial class JointLab
     }
 
     /// <summary>
-    /// For tests written when the pad turned the plane at one even gain (SwingGain both ways):
-    /// the same attitude, turned as far as the plane those tests meant now takes.
+    /// For tests written when the pad turned the plane at one even gain (SwingGain both ways) and
+    /// the guard stood at 45° of elevation: the same arm, the pad turned and tilted as far as
+    /// the poses those tests meant now take.
     /// </summary>
-    public Vector3 EvenSwing(Vector3 pad) => new(pad.X, SwingTurn(GuardPlane - SwingGain * pad.Y), pad.Z);
+    public Vector3 EvenSwing(Vector3 pad) => new(pad.X + (FormerGuardElevation - GuardElevation) / ShoulderGain,
+        SwingTurn(GuardPlane - SwingGain * pad.Y), pad.Z);
+
+    /// <summary>The guard's elevation those tests were written for.</summary>
+    private const float FormerGuardElevation = 45;
 
     /// <summary>The pad vibrates with the sword arm's postural load (unticked: not at all).</summary>
     public bool LoadRumble { get; set; } = true;

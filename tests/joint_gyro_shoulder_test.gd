@@ -46,6 +46,9 @@ func run():
 		lab.DrivePad(Vector3(noise.randf_range(-0.3, 0.3), noise.randf_range(-0.3, 0.3), noise.randf_range(-0.3, 0.3)), Vector2.ZERO, 0.0, false)
 		lab._Process(1.0 / 60)
 	var reached = abs(lab.Angle(0, 1) - lab.Target(0, 1)) < 3 and abs(lab.Angle(0, 3) - lab.Target(0, 3)) < 3
+	# The middle guard is easy on the arm: postural load category I (up to 5 points).
+	print("middle guard load %.1f" % lab.ArmLoad(0))
+	reached = reached and lab.ArmLoad(0) <= 5
 	print("after R1 with a noisy gyro: elevation %.1f of %.1f, elbow %.1f of %.1f" % [lab.Angle(0, 1), lab.Target(0, 1), lab.Angle(0, 3), lab.Target(0, 3)])
 	if not reached:
 		push_error("The arm did not move to the guard while the gyro was live")
