@@ -53,6 +53,8 @@ public partial class JointLab
     /// left) so the whole way back is this far.
     /// </summary>
     private const float SwingBackReach = 35;
+    /// <summary>In fine work (L1) the shoulder still follows the pad by this share of its gain out of it.</summary>
+    private const float FineShoulder = 0.25f;
     /// <summary>The growth of the gain to the right: plane = guard − g·r − c·r² for r degrees turned right.</summary>
     private static float SwingBackCurve => (GuardPlane - Dofs[0].Min - SwingGain * SwingBackReach) / (SwingBackReach * SwingBackReach);
 
@@ -266,9 +268,11 @@ public partial class JointLab
         else
         {
             p = pad - _padHeld;
-            // The shoulder stays held (the thrust below moves it from there, not from its last).
-            want[0] = _held[0];
-            want[1] = _held[1];
+            // The shoulder follows a little (FineShoulder of what it would out of fine work): held
+            // dead still it looked frozen, the forearm moving on a stuck arm. From where it was
+            // held, so the thrust below moves it from there, not from its last.
+            want[0] = SwingPlane(SwingTurn(_held[0]) + FineShoulder * p.Y);
+            want[1] = _held[1] + FineShoulder * ShoulderGain * p.X;
             want[3] = _held[3] + ForearmGain * p.X;        // nose up lifts the forearm: the elbow bends
             want[2] = _held[2] - ForearmGain * p.Y;        // turned right swings the forearm out
             want[4] = _held[4] - ForearmGain * p.Z;        // rolled right turns the palm up
